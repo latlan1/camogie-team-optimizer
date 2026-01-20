@@ -366,6 +366,9 @@ solveBtn.addEventListener('click', async () => {
   }
 });
 
+// Store last results for CSV download
+let lastResults = null;
+
 function displayResults(data, originalCsv) {
   const { result } = data;
   const solution = result.solution;
@@ -399,10 +402,26 @@ function displayResults(data, originalCsv) {
     }
   });
 
+  // Sort teams alphabetically by name
+  teamA.sort((a, b) => a.name.localeCompare(b.name));
+  teamB.sort((a, b) => a.name.localeCompare(b.name));
+
   // Calculate totals
   const totalA = solution?.total_rating_a || teamA.reduce((sum, p) => sum + p.rating, 0);
   const totalB = solution?.total_rating_b || teamB.reduce((sum, p) => sum + p.rating, 0);
   const diff = solution?.rating_difference || Math.abs(totalA - totalB);
+
+  // Store results for CSV download
+  lastResults = {
+    teamA,
+    teamB,
+    totalA,
+    totalB,
+    diff,
+    solveTime: result.solveTime,
+    status: result.status,
+    playerCount: players.length,
+  };
 
   // Update DOM
   document.getElementById('teamATotal').textContent = `(${totalA} points)`;
@@ -413,8 +432,9 @@ function displayResults(data, originalCsv) {
 
   teamAList.innerHTML = teamA
     .map(
-      (p) => `
+      (p, idx) => `
     <li>
+      <span class="player-number">${idx + 1}.</span>
       <span class="player-name">${p.name}</span>
       <span class="player-details">${p.position} - Rating: ${p.rating}</span>
     </li>
@@ -424,8 +444,9 @@ function displayResults(data, originalCsv) {
 
   teamBList.innerHTML = teamB
     .map(
-      (p) => `
+      (p, idx) => `
     <li>
+      <span class="player-number">${idx + 1}.</span>
       <span class="player-name">${p.name}</span>
       <span class="player-details">${p.position} - Rating: ${p.rating}</span>
     </li>
@@ -438,5 +459,52 @@ function displayResults(data, originalCsv) {
   document.getElementById('status').textContent = result.status;
   document.getElementById('playerCount').textContent = players.length;
 
+  // Show download button
+  document.getElementById('downloadBtn').style.display = 'inline-block';
+
   results.classList.add('active');
 }
+
+// Download results as CSV
+function downloadResultsCSV() {
+  if (!lastResults) return;
+
+  const { teamA, teamB, totalA, totalB, diff } = lastResults;
+  
+  // Build CSV content
+  const csvLines = [
+    'Team,Number,Name,Position,Rating',
+  ];
+
+  teamA.forEach((p, idx) => {
+    csvLines.push(`Team A,${idx + 1},${p.name},${p.position},${p.rating}`);
+  });
+
+  teamB.forEach((p, idx) => {
+    csvLines.push(`Team B,${idx + 1},${p.name},${p.position},${p.rating}`);
+  });
+
+  // Add summary
+  csvLines.push('');
+  csvLines.push('Summary');
+  csvLines.push(`Team A Total Rating,${totalA}`);
+  csvLines.push(`Team B Total Rating,${totalB}`);
+  csvLines.push(`Rating Difference,${diff}`);
+
+  const csvContent = csvLines.join('\n');
+  
+  // Create and trigger download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', 'team-assignments.csv');
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Attach download handler
+document.getElementById('downloadBtn')?.addEventListener('click', downloadResultsCSV);

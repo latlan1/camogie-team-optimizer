@@ -383,6 +383,14 @@
     .player-name {
       font-weight: 500;
       color: #333;
+      flex: 1;
+    }
+
+    .player-number {
+      color: #667eea;
+      font-weight: 600;
+      min-width: 28px;
+      margin-right: 8px;
     }
 
     .player-details {
@@ -414,6 +422,29 @@
       font-size: 13px;
       color: #888;
       margin-top: 4px;
+    }
+
+    /* Download Section */
+    .download-section {
+      margin-top: 24px;
+      text-align: center;
+    }
+
+    .btn-secondary {
+      background: white;
+      color: #667eea;
+      border: 2px solid #667eea;
+      padding: 12px 28px;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary:hover {
+      background: #667eea;
+      color: white;
     }
 
     /* Error */
@@ -616,6 +647,10 @@
           <div class="value" id="playerCount">-</div>
           <div class="label">Total Players</div>
         </div>
+      </div>
+
+      <div class="download-section">
+        <button class="btn-secondary" id="downloadBtn" style="display: none;">Download CSV</button>
       </div>
     </div>
   </div>
