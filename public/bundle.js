@@ -599,8 +599,8 @@ function displayResults(data, scenario) {
 
   // Update DOM - show position-wise breakdown for balanced_positions
   if (scenario === 'balanced_positions') {
-    document.getElementById('teamATotal').textContent = `(F:${forwardRatingA} M:${midfieldRatingA} D:${defenseRatingA} = ${totalA})`;
-    document.getElementById('teamBTotal').textContent = `(F:${forwardRatingB} M:${midfieldRatingB} D:${defenseRatingB} = ${totalB})`;
+    document.getElementById('teamATotal').textContent = `(Defense: ${defenseRatingA}, Midfield: ${midfieldRatingA}, Forward: ${forwardRatingA} = ${totalA} rating points)`;
+    document.getElementById('teamBTotal').textContent = `(Defense: ${defenseRatingB}, Midfield: ${midfieldRatingB}, Forward: ${forwardRatingB} = ${totalB} rating points)`;
   } else {
     document.getElementById('teamATotal').textContent = `(${totalA} rating points)`;
     document.getElementById('teamBTotal').textContent = `(${totalB} rating points)`;
