@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+.DS_Store
+*.log
+.env
+coverage
+.nyc_output
+
+# WASM files are copied from node_modules during build
+public/minizinc*.wasm
+public/minizinc*.data

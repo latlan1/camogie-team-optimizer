@@ -1,0 +1,42 @@
+{
+  "name": "camogie-team-minizinc-optimization",
+  "version": "1.0.0",
+  "description": "Web interface for converting CSV player data to MiniZinc files and optimizing team assignments via linear programming",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/web/server.ts",
+    "build": "npm run build:wasm",
+    "build:wasm": "echo 'Build WASM bundle' && echo 'TODO: Implement bundler for browser build'",
+    "copy-wasm": "cp -r node_modules/minizinc/dist/minizinc*.wasm node_modules/minizinc/dist/minizinc*.data public/ 2>/dev/null || echo 'WASM files will be copied after npm install'",
+    "test:cp-sat": "tsx src/cli/commands.ts cp-sat",
+    "test:gecode": "tsx src/cli/commands.ts gecode",
+    "test:cbc": "tsx src/cli/commands.ts cbc",
+    "test:coinbc": "tsx src/cli/commands.ts coinbc",
+    "test:chuffed": "tsx src/cli/commands.ts chuffed",
+    "test:all": "tsx src/cli/commands.ts all",
+    "predev": "npm run copy-wasm",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'TODO: Add ESLint configuration'",
+    "format": "echo 'TODO: Add Prettier configuration'"
+  },
+  "keywords": [
+    "minizinc",
+    "optimization",
+    "linear-programming",
+    "constraint-programming",
+    "wasm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "minizinc": "^4.4.4"
+  }
+}

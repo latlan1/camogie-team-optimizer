@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camogie Team Optimization</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* Hero Section */
+    .hero {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .hero h1 {
+      font-size: 42px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 16px;
+      letter-spacing: -1px;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero .tagline {
+      font-size: 18px;
+      color: #555;
+      max-width: 600px;
+      margin: 0 auto 24px;
+      line-height: 1.6;
+    }
+
+    /* Objective Card */
+    .objective-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 16px;
+      padding: 28px 32px;
+      margin-bottom: 32px;
+      color: white;
+      box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+    }
+
+    .objective-card h2 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .objective-card p {
+      font-size: 15px;
+      line-height: 1.7;
+      opacity: 0.95;
+    }
+
+    .objective-card code {
+      background: rgba(255,255,255,0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    /* Main Card */
+    .card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .card-header .icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .card-header h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+
+    /* Info Box */
+    .info-box {
+      background: #f8f9fc;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      border: 1px solid #e8ebf0;
+    }
+
+    .info-box h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #667eea;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .solver-list {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      list-style: none;
+    }
+
+    .solver-list li {
+      font-size: 14px;
+      color: #444;
+      padding: 8px 12px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #e8ebf0;
+    }
+
+    .solver-list li strong {
+      color: #667eea;
+    }
+
+    .info-note {
+      font-size: 13px;
+      color: #888;
+      margin-top: 12px;
+      font-style: italic;
+    }
+
+    /* Form Elements */
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .file-upload-area {
+      border: 2px dashed #d0d5dd;
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: #fafbfc;
+    }
+
+    .file-upload-area:hover {
+      border-color: #667eea;
+      background: #f5f7ff;
+    }
+
+    .file-upload-area.has-file {
+      border-color: #10b981;
+      background: #ecfdf5;
+    }
+
+    .file-upload-area input {
+      display: none;
+    }
+
+    .file-upload-area .upload-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+
+    .file-upload-area .upload-text {
+      font-size: 15px;
+      color: #555;
+    }
+
+    .file-upload-area .upload-hint {
+      font-size: 13px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .file-name {
+      margin-top: 12px;
+      font-size: 14px;
+      color: #10b981;
+      font-weight: 500;
+    }
+
+    select {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 15px;
+      border: 1px solid #d0d5dd;
+      border-radius: 10px;
+      background: white;
+      color: #333;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23667eea' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+
+    /* Button */
+    .btn-primary {
+      width: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Loading */
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .loading.active {
+      display: block;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #e8ebf0;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading p {
+      color: #666;
+      font-size: 15px;
+    }
+
+    /* Results */
+    .results {
+      display: none;
+    }
+
+    .results.active {
+      display: block;
+    }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e8ebf0;
+    }
+
+    .results-header h2 {
+      font-size: 22px;
+      color: #1a1a2e;
+    }
+
+    .results-badge {
+      background: #10b981;
+      color: white;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .teams-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .team-card {
+      background: #f8f9fc;
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .team-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .team-card h3 .total {
+      font-size: 14px;
+      color: #667eea;
+      font-weight: 500;
+    }
+
+    .team-list {
+      list-style: none;
+    }
+
+    .team-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #e8ebf0;
+      font-size: 14px;
+    }
+
+    .team-list li:last-child {
+      border-bottom: none;
+    }
+
+    .player-name {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .player-details {
+      color: #888;
+      font-size: 13px;
+    }
+
+    /* Stats */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .stat-item {
+      background: #f8f9fc;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-item .value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-item .label {
+      font-size: 13px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    /* Error */
+    .error {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #dc2626;
+      padding: 16px;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    /* Mode Banner */
+    .mode-banner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 1000;
+      transition: all 0.3s ease;
+    }
+
+    .mode-banner.local-mode {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #a5b4fc;
+    }
+
+    .mode-banner.wasm-mode {
+      background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+      color: #a7f3d0;
+    }
+
+    .mode-banner .mode-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mode-banner .mode-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .mode-banner.local-mode .mode-dot {
+      background: #818cf8;
+    }
+
+    .mode-banner.wasm-mode .mode-dot {
+      background: #34d399;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .mode-banner .mode-label {
+      font-weight: 600;
+    }
+
+    .mode-banner .mode-details {
+      opacity: 0.8;
+    }
+
+    .mode-banner .solvers-available {
+      background: rgba(255,255,255,0.1);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+
+    /* Add padding to body to account for fixed banner */
+    body {
+      padding-bottom: 60px;
+    }
+
+    @media (max-width: 640px) {
+      .teams-grid {
+        grid-template-columns: 1fr;
+      }
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
+      .solver-list {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Hero -->
+    <div class="hero">
+      <h1><span>Camogie</span> Team Optimization</h1>
+      <p class="tagline">
+        Split your players into two balanced teams using constraint programming. 
+        Upload a CSV with player ratings and let the solver find the fairest division.
+      </p>
+    </div>
+
+    <!-- Objective Card -->
+    <div class="objective-card">
+      <h2>How It Works</h2>
+      <p>
+        This tool uses <strong>MiniZinc</strong> constraint programming to solve a team balancing problem. 
+        Given a list of players with skill ratings, it assigns each player to Team A or Team B while:
+      </p>
+      <p style="margin-top: 12px;">
+        <strong>Objective:</strong> <code>minimize |total_rating_A - total_rating_B|</code>
+      </p>
+      <p style="margin-top: 8px;">
+        <strong>Constraints:</strong> Equal team sizes (or differ by at most 1 player)
+      </p>
+    </div>
+
+    <!-- Main Card -->
+    <div class="card">
+      <!-- Solver Info -->
+      <div class="info-box" id="infoBox">
+        <h3>Available Solvers</h3>
+        <ul class="solver-list" id="solverList">
+          <li><strong>CBC</strong> - Fastest (~150ms)</li>
+          <li><strong>COIN-BC</strong> - MIP solver (~330ms)</li>
+          <li><strong>Chuffed</strong> - Lazy clause gen (~370ms)</li>
+          <li><strong>CP-SAT</strong> - OR-Tools (~440ms)</li>
+        </ul>
+        <p class="info-note" id="infoNote">Gecode is disabled on macOS ARM64 due to a threading bug in the native binary.</p>
+      </div>
+
+      <!-- File Upload -->
+      <div class="form-group">
+        <label>Player Data (CSV)</label>
+        <div class="file-upload-area" id="dropZone">
+          <input type="file" id="fileInput" accept=".csv" />
+          <div class="upload-icon">📁</div>
+          <div class="upload-text">Click to upload or drag and drop</div>
+          <div class="upload-hint">CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)</div>
+          <div class="file-name" id="fileName"></div>
+        </div>
+      </div>
+
+      <!-- Solver Selection -->
+      <div class="form-group">
+        <label for="solver">Select Solver</label>
+        <select id="solver">
+          <option value="cbc" selected>CBC (Fastest)</option>
+          <option value="coinbc">COIN-BC</option>
+          <option value="chuffed">Chuffed</option>
+          <option value="cp-sat">CP-SAT (OR-Tools)</option>
+        </select>
+      </div>
+
+      <!-- Submit Button -->
+      <button class="btn-primary" id="solveBtn" disabled>Optimize Teams</button>
+
+      <!-- Loading -->
+      <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>Running solver...</p>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="card results" id="results">
+      <div class="results-header">
+        <h2>Optimized Teams</h2>
+        <span class="results-badge" id="status">OPTIMAL</span>
+      </div>
+
+      <div class="teams-grid">
+        <div class="team-card">
+          <h3>Team A <span class="total" id="teamATotal"></span></h3>
+          <ul class="team-list" id="teamAList"></ul>
+        </div>
+        <div class="team-card">
+          <h3>Team B <span class="total" id="teamBTotal"></span></h3>
+          <ul class="team-list" id="teamBList"></ul>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="value" id="ratingDiff">-</div>
+          <div class="label">Rating Difference</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="solveTime">-</div>
+          <div class="label">Solve Time (ms)</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="playerCount">-</div>
+          <div class="label">Total Players</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mode Banner -->
+  <div class="mode-banner local-mode" id="modeBanner">
+    <div class="mode-indicator">
+      <span class="mode-dot"></span>
+      <span class="mode-label" id="modeLabel">Local Mode</span>
+    </div>
+    <span class="mode-details" id="modeDetails">Using native MiniZinc binary</span>
+    <span class="solvers-available" id="solversAvailable">Solvers: cbc, coinbc, chuffed, cp-sat</span>
+  </div>
+
+  <script type="module" src="./bundle.js"></script>
+</body>
+</html>
