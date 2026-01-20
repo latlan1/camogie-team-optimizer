@@ -1,5 +1,6 @@
-% Camogie Team Assignment Model (ratings + position balance)
-% Balances both total ratings AND position distribution across teams
+% Camogie Team Assignment Model (position-wise rating balance)
+% Minimizes the sum of rating differences within each position group
+% This ensures each team has balanced skill at forwards, midfield, AND defense
 % Emits JSON for easier parsing
 
 int: num_players;
@@ -15,10 +16,12 @@ int: POS_DEFENSE = 3;
 % team_assignment[p] = 0 means Team A, 1 means Team B
 array[1..num_players] of var 0..1: team_assignment;
 
+% Team size balance constraint
 var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
 var int: team_b_size = num_players - team_a_size;
 constraint abs(team_a_size - team_b_size) <= 1;
 
+% Overall ratings (for display purposes)
 var int: total_rating_a = sum(p in 1..num_players)(ratings[p] * (1 - team_assignment[p]));
 var int: total_rating_b = sum(p in 1..num_players)(ratings[p] * team_assignment[p]);
 var int: rating_diff = abs(total_rating_a - total_rating_b);
@@ -45,25 +48,36 @@ var int: defense_b = sum(p in 1..num_players)(
   if position_indices[p] == POS_DEFENSE then team_assignment[p] else 0 endif
 );
 
-% Total position counts in dataset
-int: total_forwards = sum(p in 1..num_players)(if position_indices[p] == POS_FORWARD then 1 else 0 endif);
-int: total_midfield = sum(p in 1..num_players)(if position_indices[p] == POS_MIDFIELD then 1 else 0 endif);
-int: total_defense = sum(p in 1..num_players)(if position_indices[p] == POS_DEFENSE then 1 else 0 endif);
+% Rating sums BY POSITION for Team A
+var int: forward_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
 
-% Position balance constraints (difference <= 1 for each position type)
-constraint abs(forwards_a - forwards_b) <= 1;
-constraint abs(midfield_a - midfield_b) <= 1;
-constraint abs(defense_a - defense_b) <= 1;
+% Rating sums BY POSITION for Team B
+var int: forward_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then ratings[p] * team_assignment[p] else 0 endif
+);
+var int: midfield_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then ratings[p] * team_assignment[p] else 0 endif
+);
+var int: defense_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then ratings[p] * team_assignment[p] else 0 endif
+);
 
-% Objective: minimize weighted sum of rating diff and position imbalances
-var int: forward_diff = abs(forwards_a - forwards_b);
-var int: midfield_diff = abs(midfield_a - midfield_b);
-var int: defense_diff = abs(defense_a - defense_b);
-var int: position_diff = forward_diff + midfield_diff + defense_diff;
+% Position-wise rating differences
+var int: forward_rating_diff = abs(forward_rating_a - forward_rating_b);
+var int: midfield_rating_diff = abs(midfield_rating_a - midfield_rating_b);
+var int: defense_rating_diff = abs(defense_rating_a - defense_rating_b);
 
-% Weight: position balance is secondary to rating balance
-int: RATING_WEIGHT = 10;
-var int: objective = rating_diff * RATING_WEIGHT + position_diff;
+% Objective: minimize sum of position-wise rating differences
+% This ensures balanced skill at each position, not just overall
+var int: objective = forward_rating_diff + midfield_rating_diff + defense_rating_diff;
 
 solve minimize objective;
 
@@ -82,8 +96,15 @@ output [
   "\"midfield_b\": ", show(midfield_b), ",",
   "\"defense_a\": ", show(defense_a), ",",
   "\"defense_b\": ", show(defense_b), ",",
-  "\"position_diff\": ", show(position_diff), ",",
-  "\"rating_weight\": ", show(RATING_WEIGHT), ",",
+  "\"forward_rating_a\": ", show(forward_rating_a), ",",
+  "\"forward_rating_b\": ", show(forward_rating_b), ",",
+  "\"forward_rating_diff\": ", show(forward_rating_diff), ",",
+  "\"midfield_rating_a\": ", show(midfield_rating_a), ",",
+  "\"midfield_rating_b\": ", show(midfield_rating_b), ",",
+  "\"midfield_rating_diff\": ", show(midfield_rating_diff), ",",
+  "\"defense_rating_a\": ", show(defense_rating_a), ",",
+  "\"defense_rating_b\": ", show(defense_rating_b), ",",
+  "\"defense_rating_diff\": ", show(defense_rating_diff), ",",
   "\"objective\": ", show(objective), ",",
   "\"assignment\": ", show(team_assignment), "},",
   "\"statistics\": {}",

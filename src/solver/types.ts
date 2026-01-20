@@ -10,6 +10,15 @@ export interface TeamAssignment {
   total_rating_a: number;
   total_rating_b: number;
   rating_difference: number;
+  assignment?: number[];
+  team_a_size?: number;
+  team_b_size?: number;
+  forwards_a?: number;
+  forwards_b?: number;
+  midfield_a?: number;
+  midfield_b?: number;
+  defense_a?: number;
+  defense_b?: number;
 }
 
 export interface SolverConfig {
@@ -29,7 +38,7 @@ export interface SolverResult {
 export type ExecutionMode = 'browser' | 'node';
 
 export interface MiniZincInitConfig {
-  mode: ExecutionMode;
+  mode?: ExecutionMode;
   wasmURL?: string;
   workerURL?: string;
   dataURL?: string;

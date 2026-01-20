@@ -5,8 +5,7 @@ import type {
   ModelData,
   SolverConfig,
   SolverResult,
-  TeamAssignment,
-} from './types';
+} from './types.js';
 
 export class MiniZincService {
   private mode: ExecutionMode;
@@ -46,7 +45,12 @@ export class MiniZincService {
     return true;
   }
 
-  async solve(modelCode: string, data: ModelData, config: SolverConfig, modelFilename: string = 'model.mzn'): Promise<SolverResult> {
+  async solve(
+    modelCode: string,
+    data: ModelData,
+    config: SolverConfig,
+    modelFilename: string = 'model.mzn'
+  ): Promise<SolverResult> {
     if (!this.initialized) {
       await this.init();
     }
@@ -72,42 +76,54 @@ export class MiniZincService {
           'time-limit': config.timeLimit || 10000,
           'all-solutions': config.allSolutions || false,
           statistics: true,
-          // If solver tag not found, MiniZinc will throw. Caller handles fallback.
         },
       });
 
-      const result = await solve; // minizinc-js returns a promise-like solve handle
+      const result = await solve;
       const solveTime = Date.now() - startTime;
+
+      // Extract solution data from minizinc result
+      // The result structure varies between Node and WASM modes
+      const resultAny = result as any;
 
       // Try to parse JSON from solver output blocks
       let parsed: any = null;
       const rawOutput =
-        typeof result?.output === 'string'
-          ? result.output
-          : typeof result?.solution?.output?.default === 'string'
-            ? result.solution.output.default
-            : null;
-      if (rawOutput) {
+        resultAny?.output ??
+        resultAny?.solution?.output?.default ??
+        null;
+
+      if (typeof rawOutput === 'string') {
         try {
           parsed = JSON.parse(rawOutput.trim());
-        } catch (e) {
-          // ignore
+        } catch {
+          // ignore parsing errors
         }
       }
 
+      // Extract status - try multiple locations
       const status =
         parsed?.status ||
-        result?.status ||
-        result?.result?.status ||
-        result?.solution?.status ||
+        resultAny?.status ||
+        resultAny?.result?.status ||
+        resultAny?.solution?.status ||
         (parsed ? 'OPTIMAL' : 'UNKNOWN');
+
+      // Extract solution - try multiple locations
       const extractedSolution =
         parsed?.solution ||
-        result?.solution?.solution ||
-        result?.solution ||
-        result?.result ||
+        resultAny?.solution?.output?.json ||
+        resultAny?.solution?.solution ||
+        resultAny?.solution ||
+        resultAny?.result ||
         null;
-      const statistics = parsed?.statistics || result?.statistics || result?.result?.statistics || null;
+
+      // Extract statistics
+      const statistics =
+        parsed?.statistics ||
+        resultAny?.statistics ||
+        resultAny?.result?.statistics ||
+        null;
 
       return {
         status,
@@ -115,57 +131,34 @@ export class MiniZincService {
         statistics,
         solveTime,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       const solveTime = Date.now() - startTime;
-      
+
       // Better error message formatting
       let errorMessage = 'Unknown error';
-      if (error?.message) {
+      if (error instanceof Error) {
         errorMessage = error.message;
       } else if (typeof error === 'string') {
         errorMessage = error;
-      } else if (error?.toString && error.toString() !== '[object Object]') {
-        errorMessage = error.toString();
-      } else {
-        errorMessage = JSON.stringify(error);
+      } else if (error && typeof error === 'object') {
+        const errObj = error as Record<string, unknown>;
+        if (typeof errObj.message === 'string') {
+          errorMessage = errObj.message;
+        } else if (errObj.toString && errObj.toString() !== '[object Object]') {
+          errorMessage = String(errObj);
+        } else {
+          errorMessage = JSON.stringify(error);
+        }
       }
-      
+
       return {
         status: 'ERROR',
         solution: null,
-        statistics: error?.statistics || null,
+        statistics: null,
         solveTime,
         errorMessage,
       };
     }
-  }
-
-  private async waitForSolution(solve: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      let lastSolution: any = null;
-
-      solve.on('solution', (solution: any) => {
-        lastSolution = solution;
-      });
-
-      solve.on('statistics', (stats: any) => {
-        lastSolution = lastSolution || stats;
-      });
-
-      solve.on('exit', (exit: any) => {
-        if (exit.code === 0) {
-          resolve(lastSolution);
-        } else {
-          reject(new Error(`MiniZinc exited with code ${exit.code}`));
-        }
-      });
-
-      if (typeof solve.catch === 'function') {
-        solve.catch(reject);
-      } else if (typeof solve.then === 'function') {
-        solve.then(() => undefined, reject);
-      }
-    });
   }
 
   getMode(): ExecutionMode {
@@ -185,6 +178,6 @@ export class MiniZincService {
     // - cp-sat: OR-Tools CP-SAT, works
     // - chuffed: Lazy clause generation, manually installed, works
     // - gecode: crashes on ARM64 (Homebrew threading bug)
-    return ['coinbc', 'cbc', 'cp-sat', 'chuffed'];
+    return ['cbc', 'coinbc', 'cp-sat', 'chuffed'];
   }
 }

@@ -1,12 +1,5 @@
-export * from './browser/ui.js';
+// Browser entry point - exports browser UI utilities
+// Note: The main browser functionality is in public/bundle.js (WASM mode)
+// This file is for potential future bundling with a build tool
 
-window.addEventListener('DOMContentLoaded', async () => {
-  console.log('Initializing Camogie Team Optimization...');
-  
-  try {
-    await initApp();
-  } catch (error) {
-    console.error('Failed to initialize:', error);
-    alert('Failed to initialize. Please check the console for details.');
-  }
-});
+export * from './browser/ui.js';

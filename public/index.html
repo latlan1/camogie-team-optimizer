@@ -604,6 +604,7 @@
         <select id="scenario">
           <option value="ratings_only">Ratings Only - Balance teams by total skill rating</option>
           <option value="with_positions">Ratings + Positions - Balance ratings AND position distribution</option>
+          <option value="balanced_positions">Position-wise Ratings - Balance skill within each position</option>
         </select>
       </div>
 
@@ -663,6 +664,14 @@
 
       <div class="download-section">
         <button class="btn-secondary" id="downloadBtn" style="display: none;">Download CSV</button>
+      </div>
+
+      <!-- Solver Output Details -->
+      <div id="solverOutput" style="display: none; margin-top: 24px;">
+        <h3 style="font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px;">Solver Output Details</h3>
+        <div style="background: #1a1a2e; border-radius: 10px; padding: 20px; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 13px; color: #a5b4fc; overflow-x: auto;">
+          <pre id="solverOutputPre" style="margin: 0; white-space: pre-wrap;"></pre>
+        </div>
       </div>
     </div>
   </div>

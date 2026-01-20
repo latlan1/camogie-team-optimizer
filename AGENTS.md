@@ -3,40 +3,89 @@
 This document provides guidelines and commands for agentic coding agents working on this repository.
 
 ## Project Overview
-Web interface for converting CSV player data to MiniZinc (.dzn) files and optimizing team assignments via linear programming. Currently uses local MiniZinc with plans for WASM deployment.
+Web interface for converting CSV player data to MiniZinc (.dzn) files and optimizing team assignments via linear programming. Uses dual-mode architecture with native MiniZinc (local) and WASM (browser) support.
 
 ## Tech Stack
 - **Language**: TypeScript + HTML (static, no build framework)
-- **Solver**: MiniZinc (local installation) with Gecode/Coin-BC solvers
-- **Future**: minizinc-js for WASM deployment on GitHub Pages
+- **Solver**: MiniZinc (via `minizinc` npm package)
+- **Local solvers**: cbc, coinbc, cp-sat, chuffed
+- **WASM solvers**: gecode, chuffed, cbc
+- **Server**: Express.js (local dev only)
 
 ## Commands
 
 ### Development
 ```bash
-# Install dependencies (will add package.json later)
+# Install dependencies
 npm install
 
-# Start local development server
-npx serve . -p 8080
+# Start Express server (port 3000, local mode)
+npm run dev
+
+# Start static server for WASM mode (port 8080)
+npx serve public/ -p 8080
 
 # Run TypeScript compiler to check types
-npx tsc --noEmit
-
-# Watch for changes and typecheck
-npx tsc --watch --noEmit
+npm run typecheck
 ```
 
-### Testing
+### CLI Testing
+
+The CLI supports flexible testing across solvers and scenarios.
+
 ```bash
-# Run all tests (add test framework later)
-npm test
+# Show CLI help
+npm run cli:help
 
-# Run specific test file
-npm test -- --grep "team-splitting"
+# Run with defaults (cbc solver, ratings_only scenario)
+npm run cli
 
-# Run tests in watch mode
-npm test -- --watch
+# Test specific solver
+npm run test:cbc
+npm run test:coinbc
+npm run test:cp-sat
+npm run test:chuffed
+
+# Test specific scenario
+npm run test:ratings        # ratings_only scenario
+npm run test:positions      # with_positions scenario
+
+# Test all solvers
+npm run test:all-solvers
+
+# Test all scenarios
+npm run test:all-scenarios
+
+# Full matrix: all solvers x all scenarios
+npm run test:all
+npm run test:matrix
+```
+
+**Advanced CLI usage:**
+```bash
+# Custom solver and scenario
+npx tsx src/cli/commands.ts --solver cbc --scenario with_positions
+
+# Short flags
+npx tsx src/cli/commands.ts -s coinbc -c ratings_only
+
+# Custom CSV file
+npx tsx src/cli/commands.ts --file data/my-team.csv
+
+# Combine all options
+npx tsx src/cli/commands.ts -s all -c all --file data/test-players.csv
+```
+
+### MiniZinc Operations
+```bash
+# Compile and solve a model directly
+minizinc models/team_assignment_ratings_only.mzn data.dzn --solver gecode
+
+# List available solvers
+minizinc --solvers
+
+# Validate model syntax
+minizinc --model-check-only models/team_assignment_with_positions.mzn
 ```
 
 ### Linting & Formatting
@@ -44,72 +93,48 @@ npm test -- --watch
 # Run ESLint (add ESLint config later)
 npm run lint
 
-# Run ESLint with auto-fix
-npm run lint -- --fix
-
 # Format code with Prettier (add Prettier config later)
 npm run format
-
-# Check formatting without changing files
-npm run format:check
-```
-
-### MiniZinc Operations
-```bash
-# Compile and solve a model
-minizinc model.mzn data.dzn --solver gecode
-
-# List available solvers
-minizinc --solvers
-
-# Test with different solvers
-minizinc model.mzn data.dzn --solver fzn-coin-or
-
-# Validate model syntax
-minizinc --model-check-only model.mzn data.dzn
 ```
 
 ## Code Style Guidelines
 
 ### File Organization
 ```
-/
-├── index.html              # Main web interface
-├── src/
-│   ├── types/             # TypeScript type definitions
-│   ├── csv-parser.ts      # CSV to DZN conversion
-│   ├── solver.ts          # MiniZinc solver interface
-│   └── ui.ts              # DOM manipulation and event handlers
-├── models/
-│   └── team-assignment.mzn # MiniZinc model for team splitting
-├── data/
-│   └── example.csv        # Sample input data
-├── test/
-│   ├── csv-parser.test.ts
-│   └── solver.test.ts
-└── AGENTS.md              # This file
+src/
+├── shared/              # Shared utilities and constants
+│   ├── constants.ts     # Scenarios, positions, solvers
+│   ├── utils.ts         # CSV parsing, player utilities
+│   └── index.ts         # Re-exports
+├── solver/
+│   ├── service.ts       # MiniZinc service abstraction
+│   └── types.ts         # TypeScript interfaces
+├── cli/
+│   └── commands.ts      # CLI entry point
+├── web/
+│   └── server.ts        # Express API server
+└── browser/
+    └── ui.ts            # Browser UI helpers
 ```
 
 ### TypeScript Guidelines
 - Use strict mode in tsconfig.json
 - Prefer `const` and `let` over `var`
 - Use explicit return types for functions
-- Leverage utility types (`Partial<T>`, `Pick<T>`, `Record<K,V>`)
+- Import from shared modules: `import { parseCSV } from '../shared/utils.js'`
 - Use interfaces for object shapes, types for unions/primitives
 - Avoid `any` - use `unknown` for truly dynamic data
 
 ### Import Style
-- Group imports: external libs → internal modules → relative modules
+- Always use `.js` extension for local imports (ESM requirement)
+- Group imports: external libs -> internal modules -> relative modules
 - Use named imports when possible: `import { foo } from 'bar'`
-- Use default imports for React-like components (if added later)
-- Order: 1) React/types, 2) External libraries, 3) Internal modules
 
 ### Naming Conventions
 - Files: `kebab-case.ts`
 - Variables/Functions: `camelCase`
 - Classes/Interfaces: `PascalCase`
 - Constants: `SCREAMING_SNAKE_CASE`
-- Private members: `_prefix` or `#private` syntax
 - MiniZinc variables: `snake_case` (follow MiniZinc conventions)
 
 ### Error Handling
@@ -117,46 +142,86 @@ minizinc --model-check-only model.mzn data.dzn
 - Use try-catch for synchronous code that may throw
 - Provide meaningful error messages to users
 - Log errors to console for debugging
-- Never expose sensitive data in error messages
+
+### Shared Constants
+Use constants from `src/shared/constants.ts`:
+```typescript
+import { SCENARIOS, POSITIONS, SOLVERS, DEFAULT_SOLVER } from '../shared/constants.js';
+```
+
+### Shared Utilities
+Use utilities from `src/shared/utils.ts`:
+```typescript
+import { parseCSV, sortPlayersByPosition, splitIntoTeams, countPositions } from '../shared/utils.js';
+```
 
 ### CSV/DZN Conversion
+- Use `parseCSV()` from shared utils for consistent parsing
 - Validate CSV structure before conversion
 - Handle missing/malformed data gracefully
-- Generate valid MiniZinc syntax for .dzn files
 - Support flexible CSV column ordering (match by headers)
-- Type-check numeric values (ratings, skill levels, etc.)
 
 ### MiniZinc Model Guidelines
 - Use clear, descriptive variable names
 - Add inline comments explaining constraints
-- Structure: parameters → variables → constraints → solve item
-- Use arrays and sets efficiently
-- Consider solver hints (e.g., `int_search`, `first_fail`)
-- Test with multiple solvers to ensure portability
+- Structure: parameters -> variables -> constraints -> solve item
+- Output JSON for easier parsing in TypeScript
+- Use RATING_WEIGHT constant (currently 10) for objective weighting
 
 ### HTML/CSS Guidelines
 - Use semantic HTML5 elements
 - Keep CSS inline or in `<style>` tags (no preprocessors needed)
 - Ensure accessibility (labels, ARIA attributes where needed)
 - Responsive design for mobile compatibility
-- Clean, simple UI focused on file upload and results display
 
-### Testing
-- Unit tests for CSV parsing logic
-- Integration tests for MiniZinc solver calls
-- Mock MiniZinc subprocess calls in tests
-- Test with edge cases (empty CSV, malformed data)
-- Verify generated .dzn files are syntactically valid
+## Scenarios
 
-## Phase 2: WASM Migration Considerations
-- Swap local `minizinc` CLI calls for `minizinc-js` library
-- Handle WASM binary loading with progress indicators
-- Test performance limits in browser environment
-- Ensure generated models work with Gecode WASM solver
-- Consider loading strategies (eager/lazy) for WASM files
+| ID | Name | Model File | Description |
+|----|------|------------|-------------|
+| `ratings_only` | Ratings Only | `team_assignment_ratings_only.mzn` | Balance by total ratings only |
+| `with_positions` | Ratings + Positions | `team_assignment_with_positions.mzn` | Balance ratings AND position counts |
+| `balanced_positions` | Position-wise Ratings | `team_assignment_balanced_positions.mzn` | Balance ratings within each position |
 
-## Solver Selection Guidance
-- **Gecode**: Good default, handles general CP problems well
-- **Coin-BC**: Better for pure linear programming (no integer constraints)
-- Test both during local development to inform WASM choice
-- Allow users to select solver via UI in future iterations
+## Testing New Features
+
+1. **Add new scenario:**
+   - Create model in `models/` directory
+   - Add entry to `SCENARIOS` in `src/shared/constants.ts`
+   - Test via CLI: `npx tsx src/cli/commands.ts -s cbc -c new_scenario`
+
+2. **Add new solver:**
+   - Add to `SOLVERS.local` or `SOLVERS.wasm` in constants
+   - Update `getAvailableSolvers()` in service.ts if needed
+   - Test via CLI: `npm run test:new-solver`
+
+3. **Modify shared utilities:**
+   - Update `src/shared/utils.ts`
+   - Ensure server.ts and commands.ts both use the updated functions
+   - Run `npm run typecheck` to verify
+
+## Solver Notes
+
+- **cbc**: Fastest (~145ms), recommended default
+- **coinbc**: Alternative MIP solver (~333ms)
+- **cp-sat**: OR-Tools, local only (~441ms)
+- **chuffed**: Lazy clause generation (~367ms)
+- **gecode**: Crashes on macOS ARM64 locally, works in WASM
+
+## Quick Reference
+
+```bash
+# Start local dev server
+npm run dev
+
+# Start WASM server
+npx serve public/ -p 8080
+
+# Run full test matrix
+npm run test:all
+
+# Type check
+npm run typecheck
+
+# Show CLI help
+npm run cli:help
+```

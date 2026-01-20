@@ -1,170 +1,138 @@
+/**
+ * Browser UI utilities for MiniZinc solver
+ * 
+ * Note: The main browser functionality is currently in public/bundle.js
+ * This module provides utilities that can be used when bundling with a build tool.
+ */
+
 import { MiniZincService } from '../solver/service.js';
+import {
+  SCENARIOS,
+  POSITIONS,
+  type ScenarioId,
+  type PositionName,
+} from '../shared/constants.js';
+import type { Player, ModelData } from '../solver/types.js';
+
+// Re-export shared utilities for browser use
+export {
+  parseCSV,
+  sortPlayersByPosition,
+  splitIntoTeams,
+  countPositions,
+  calculateTotalRating,
+} from '../shared/utils.js';
 
 const service = new MiniZincService();
 
 let modelCodes: Record<string, string> = {};
 
-export async function initApp(): Promise<void> {
+/**
+ * Initialize the MiniZinc service for browser mode
+ */
+export async function initMiniZinc(): Promise<void> {
   try {
     await service.init();
     console.log('MiniZinc initialized in browser mode');
     console.log('Available solvers:', service.getAvailableSolvers());
-
-    await loadModels();
   } catch (error) {
     console.error('Failed to initialize MiniZinc:', error);
     throw error;
   }
 }
 
-async function loadModels(): Promise<void> {
-  const loadModel = async (filename: string): Promise<string> => {
-    const response = await fetch(`./${filename}`);
-    if (!response.ok) {
-      throw new Error(`Failed to load model: ${filename}`);
-    }
-    return response.text();
-  };
+/**
+ * Load MiniZinc model code from URL
+ */
+export async function loadModel(filename: string): Promise<string> {
+  const response = await fetch(`./${filename}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load model: ${filename}`);
+  }
+  return response.text();
+}
 
-  modelCodes = {
-    ratings_only: await loadModel('team_assignment_ratings_only.mzn'),
-    with_positions: await loadModel('team_assignment_with_positions.mzn'),
-  };
-
+/**
+ * Load all available model files
+ */
+export async function loadAllModels(): Promise<void> {
+  for (const [id, scenario] of Object.entries(SCENARIOS)) {
+    modelCodes[id] = await loadModel(scenario.modelFile);
+  }
   console.log('Loaded models:', Object.keys(modelCodes));
 }
 
+/**
+ * Solve a model with the given data and configuration
+ */
 export async function solveModel(
-  scenario: string,
-  data: any,
-  solver: string,
-  onProgress?: (status: string) => void,
-  onSolution?: (solution: any) => void,
-  onStatistics?: (stats: any) => void,
+  scenarioId: ScenarioId,
+  data: ModelData,
+  solver: string
 ): Promise<any> {
-  const modelCode = modelCodes[scenario];
+  const modelCode = modelCodes[scenarioId];
   if (!modelCode) {
-    throw new Error(`Unknown scenario: ${scenario}. Available: ${Object.keys(modelCodes).join(', ')}`);
+    throw new Error(`Model not loaded for scenario: ${scenarioId}`);
   }
 
-  try {
-    const config = {
-      solver: solver as 'gecode' | 'chuffed' | 'cbc' | 'coinbc' | 'cp-sat',
-      timeLimit: 10000,
-    };
+  const config = {
+    solver: solver as 'gecode' | 'chuffed' | 'cbc' | 'coinbc' | 'cp-sat',
+    timeLimit: 10000,
+  };
 
-    if (onProgress) {
-      onProgress(`Starting ${solver} solver for ${scenario} scenario...`);
-    }
-
-    const result = await service.solve(modelCode, data, config);
-
-    if (result.status === 'ERROR') {
-      throw new Error('Solver failed. Ensure MiniZinc binary is installed and available in PATH for local mode.');
-    }
-
-    if (onSolution && result.solution) {
-      onSolution(result.solution);
-    }
-
-    if (onStatistics && result.statistics) {
-      onStatistics(result.statistics);
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Solver error:', error);
-    throw error;
-  }
+  return service.solve(modelCode, data, config);
 }
 
+/**
+ * Get list of available solvers for current mode
+ */
 export function getAvailableSolvers(): string[] {
   return service.getAvailableSolvers();
 }
 
+/**
+ * Get current execution mode (browser or node)
+ */
 export function getCurrentMode(): string {
   return service.getMode();
 }
 
+/**
+ * Get list of loaded scenarios
+ */
 export function getScenarios(): string[] {
   return Object.keys(modelCodes);
 }
 
-export function parseCSV(csvText: string): any {
-  const lines = csvText.trim().split('\n');
-  if (lines.length < 2) {
-    throw new Error('CSV must have at least a header and one data row');
-  }
-
-  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-  const nameIdx = headers.indexOf('name');
-  const ratingIdx = headers.indexOf('rating');
-  const positionIdx = headers.indexOf('position');
-
-  if (nameIdx === -1 || ratingIdx === -1) {
-    throw new Error('CSV must contain "name" and "rating" columns');
-  }
-
-  const players: any[] = [];
-  const ratings: number[] = [];
-  const positions: string[] = [];
-  const positionIndices: number[] = [];
-
-  const positionMap: Record<string, number> = {
-    'forward': 1,
-    'defense': 3,
-    'midfield': 2,
-  };
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    if (values.length >= 2) {
-      const player = values[nameIdx]?.trim() || `Player ${i}`;
-      const rating = parseInt(values[ratingIdx]?.trim(), 10);
-      const position = positionIdx !== -1 ? values[positionIdx]?.trim()?.toLowerCase() || 'unknown' : 'unknown';
-
-      if (!isNaN(rating)) {
-        players.push(player);
-        ratings.push(rating);
-        positions.push(position);
-        positionIndices.push(positionMap[position] || 0);
-      }
-    }
-  }
-
-  return {
-    num_players: players.length,
-    players: players.map((p, i) => ({ name: p, rating: ratings[i], position: positions[i], positionIndex: positionIndices[i] })),
-    ratings,
-    positions,
-    position_indices: positionIndices,
-  };
+/**
+ * Get scenario configuration by ID
+ */
+export function getScenarioConfig(scenarioId: ScenarioId) {
+  return SCENARIOS[scenarioId];
 }
 
-export function displayResults(solution: any): void {
+/**
+ * Get position configuration by name
+ */
+export function getPositionConfig(positionName: PositionName) {
+  return POSITIONS[positionName];
+}
+
+/**
+ * Display results in console (for debugging)
+ */
+export function displayResults(result: any): void {
   console.log('\n=== Solution Results ===');
   
-  if (solution.status === 'OPTIMAL' || solution.status === 'SATISFIED') {
-    console.log(`Status: ${solution.status}`);
-    console.log(`Solve Time: ${solution.solveTime}ms`);
+  if (result.status === 'OPTIMAL' || result.status === 'SATISFIED') {
+    console.log(`Status: ${result.status}`);
+    console.log(`Solve Time: ${result.solveTime}ms`);
 
-    if (solution.solution) {
-      const sol = solution.solution;
-      console.log(`\nTeam A (${sol.total_rating_a} points):`);
-      if (sol.team_a) {
-        sol.team_a.forEach((player: any, i: number) => {
-          console.log(`  ${i + 1}. ${player.name} (${player.position}, rating: ${player.rating})`);
-        });
-      }
-
-      console.log(`\nTeam B (${sol.total_rating_b}} points):`);
-      if (sol.team_b) {
-        sol.team_b.forEach((player: any, i: number) => {
-          console.log(`  ${i + 1}. ${player.name} (${player.position}, rating: ${player.rating})`);
-        });
-      }
-
-      console.log(`\nRating Difference: ${sol.rating_difference}`);
+    if (result.solution) {
+      const sol = result.solution;
+      console.log(`\nTeam A: ${sol.total_rating_a} points`);
+      console.log(`Team B: ${sol.total_rating_b} points`);
+      console.log(`Rating Difference: ${sol.rating_difference}`);
 
       if (sol.forwards_a !== undefined) {
         console.log('\nPosition Distribution:');
@@ -173,15 +141,7 @@ export function displayResults(solution: any): void {
       }
     }
   } else {
-    console.log(`Status: ${solution.status}`);
+    console.log(`Status: ${result.status}`);
     console.log('No solution found');
-  }
-
-  if (solution.statistics) {
-    console.log('\nStatistics:');
-    const stats = solution.statistics;
-    console.log('  Nodes:', stats.nodes || stats['nodes']);
-    console.log('  Failures:', stats.failures || stats['failures']);
-    console.log('  Restarts:', stats.restartCount || stats['restarts']);
   }
 }
