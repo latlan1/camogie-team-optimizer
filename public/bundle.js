@@ -3,6 +3,7 @@
 const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('dropZone');
 const solverSelect = document.getElementById('solver');
+const scenarioSelect = document.getElementById('scenario');
 const solveBtn = document.getElementById('solveBtn');
 const loading = document.getElementById('loading');
 const results = document.getElementById('results');
@@ -20,14 +21,12 @@ let wasmInitialized = false;
 let MiniZinc = null;
 
 // MiniZinc model code (embedded for WASM mode)
-// Note: WASM uses --output-mode json, so we just need the model without custom output
-const MODEL_CODE = `
-% Camogie Team Assignment Model
+const RATINGS_ONLY_MODEL = `
+% Camogie Team Assignment Model (balanced by ratings)
 int: num_players;
 array[1..num_players] of int: ratings;
 array[1..num_players] of int: position_indices;
 
-% team_assignment[p] = 0 means Team A, 1 means Team B
 array[1..num_players] of var 0..1: team_assignment;
 
 var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
@@ -41,19 +40,139 @@ var int: rating_diff = abs(total_rating_a - total_rating_b);
 solve minimize rating_diff;
 `;
 
+const WITH_POSITIONS_MODEL = `
+% Camogie Team Assignment Model (ratings + position balance)
+int: num_players;
+array[1..num_players] of int: ratings;
+array[1..num_players] of int: position_indices;
+
+int: NUM_POSITIONS = 3;
+int: POS_FORWARD = 1;
+int: POS_MIDFIELD = 2;
+int: POS_DEFENSE = 3;
+int: RATING_WEIGHT = 10;
+
+array[1..num_players] of var 0..1: team_assignment;
+
+var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
+var int: team_b_size = num_players - team_a_size;
+constraint abs(team_a_size - team_b_size) <= 1;
+
+var int: total_rating_a = sum(p in 1..num_players)(ratings[p] * (1 - team_assignment[p]));
+var int: total_rating_b = sum(p in 1..num_players)(ratings[p] * team_assignment[p]);
+var int: rating_diff = abs(total_rating_a - total_rating_b);
+
+var int: forwards_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then (1 - team_assignment[p]) else 0 endif
+);
+
+var int: forwards_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then team_assignment[p] else 0 endif
+);
+var int: midfield_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then team_assignment[p] else 0 endif
+);
+var int: defense_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then team_assignment[p] else 0 endif
+);
+
+constraint abs(forwards_a - forwards_b) <= 1;
+constraint abs(midfield_a - midfield_b) <= 1;
+constraint abs(defense_a - defense_b) <= 1;
+
+var int: forward_diff = abs(forwards_a - forwards_b);
+var int: midfield_diff = abs(midfield_a - midfield_b);
+var int: defense_diff = abs(defense_a - defense_b);
+var int: position_diff = forward_diff + midfield_diff + defense_diff;
+
+var int: objective = rating_diff * RATING_WEIGHT + position_diff;
+
+solve minimize objective;
+`;
+
+const BALANCED_POSITIONS_MODEL = `
+% Camogie Team Assignment Model (position-wise rating balance)
+int: num_players;
+array[1..num_players] of int: ratings;
+array[1..num_players] of int: position_indices;
+
+int: NUM_POSITIONS = 3;
+int: POS_FORWARD = 1;
+int: POS_MIDFIELD = 2;
+int: POS_DEFENSE = 3;
+
+array[1..num_players] of var 0..1: team_assignment;
+
+var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
+var int: team_b_size = num_players - team_a_size;
+constraint abs(team_a_size - team_b_size) <= 1;
+
+var int: total_rating_a = sum(p in 1..num_players)(ratings[p] * (1 - team_assignment[p]));
+var int: total_rating_b = sum(p in 1..num_players)(ratings[p] * team_assignment[p]);
+var int: rating_diff = abs(total_rating_a - total_rating_b);
+
+var int: forward_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_rating_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then ratings[p] * (1 - team_assignment[p]) else 0 endif
+);
+
+var int: forward_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then ratings[p] * team_assignment[p] else 0 endif
+);
+var int: midfield_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then ratings[p] * team_assignment[p] else 0 endif
+);
+var int: defense_rating_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then ratings[p] * team_assignment[p] else 0 endif
+);
+
+var int: forward_rating_diff = abs(forward_rating_a - forward_rating_b);
+var int: midfield_rating_diff = abs(midfield_rating_a - midfield_rating_b);
+var int: defense_rating_diff = abs(defense_rating_a - defense_rating_b);
+
+var int: objective = forward_rating_diff + midfield_rating_diff + defense_rating_diff;
+
+solve minimize objective;
+`;
+
+// Update scenario description when selection changes
+scenarioSelect?.addEventListener('change', updateScenarioDescription);
+
+function updateScenarioDescription() {
+  const scenarioDesc = document.getElementById('scenarioDescription');
+  if (!scenarioDesc) return;
+  
+  switch (scenarioSelect.value) {
+    case 'with_positions':
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings + Positions - Teams balanced by skill rating AND position distribution.';
+      break;
+    case 'balanced_positions':
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Position-wise Ratings - Balance skill ratings within each position group (forwards, midfield, defense).';
+      break;
+    default:
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings Only - Teams balanced by total skill rating only.';
+  }
+}
+
 // Detect mode and update banner
 async function detectMode() {
   try {
     // Try to reach the Express API - if it works, we're in local mode
-    const response = await fetch('/api/solve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ solver: 'cbc', csvData: 'name,rating\nTest,5' })
-    });
+    const response = await fetch('/api/scenarios');
     
     if (response.ok) {
-      const data = await response.json();
-      setMode('local', data.mode === 'node' ? 'node' : 'browser');
+      setMode('local', 'node');
     } else {
       await initWasmMode();
     }
@@ -105,11 +224,22 @@ async function initWasmMode() {
   }
 }
 
+// Update favicon based on mode
+function setFavicon(mode) {
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) {
+    favicon.href = mode === 'wasm' ? './favicon-wasm.svg' : './favicon.svg';
+  }
+}
+
 function setMode(mode, serverMode = null) {
   currentMode = mode;
   
   const solverList = document.getElementById('solverList');
   const infoNote = document.getElementById('infoNote');
+  
+  // Update favicon to match mode
+  setFavicon(mode);
   
   if (mode === 'local') {
     modeBanner.classList.remove('wasm-mode');
@@ -241,20 +371,44 @@ function parseCSV(csvText) {
   };
 }
 
+// Sort players by position (defense, midfield, forward) then by name
+function sortPlayers(players) {
+  const positionOrder = { defense: 1, midfield: 2, forward: 3 };
+  return [...players].sort((a, b) => {
+    const posA = positionOrder[a.position?.toLowerCase()] || 99;
+    const posB = positionOrder[b.position?.toLowerCase()] || 99;
+    if (posA !== posB) return posA - posB;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // Solve using WASM
-async function solveWithWasm(solver, modelData) {
+async function solveWithWasm(solver, scenario, modelData) {
   if (!wasmInitialized || !MiniZinc) {
     throw new Error('MiniZinc WASM not initialized');
   }
 
   const startTime = Date.now();
+  
+  // Select model based on scenario
+  let modelCode;
+  switch (scenario) {
+    case 'with_positions':
+      modelCode = WITH_POSITIONS_MODEL;
+      break;
+    case 'balanced_positions':
+      modelCode = BALANCED_POSITIONS_MODEL;
+      break;
+    default:
+      modelCode = RATINGS_ONLY_MODEL;
+  }
 
   // Use MiniZinc.Model from named exports
   const model = new MiniZinc.Model();
-  model.addFile('team-assignment.mzn', MODEL_CODE);
+  model.addFile('team-assignment.mzn', modelCode);
   model.addJson(modelData);
 
-  console.log('Starting solve with solver:', solver);
+  console.log('Starting solve with solver:', solver, 'scenario:', scenario);
 
   const solve = model.solve({
     options: {
@@ -271,7 +425,6 @@ async function solveWithWasm(solver, modelData) {
   console.log('Solve result:', JSON.stringify(result, null, 2));
 
   // Extract solution from result
-  // WASM result format: { status, solution: { output: { json: {...} } }, statistics }
   let solution = null;
   let status = result?.status || 'UNKNOWN';
 
@@ -279,7 +432,6 @@ async function solveWithWasm(solver, modelData) {
     const output = result.solution.output;
     console.log('Solution output:', JSON.stringify(output, null, 2));
     
-    // With jsonOutput: true, variables are in output.json
     if (output?.json) {
       const json = output.json;
       solution = {
@@ -287,6 +439,15 @@ async function solveWithWasm(solver, modelData) {
         total_rating_a: json.total_rating_a,
         total_rating_b: json.total_rating_b,
         rating_difference: json.rating_diff,
+        forwards_a: json.forwards_a,
+        forwards_b: json.forwards_b,
+        midfield_a: json.midfield_a,
+        midfield_b: json.midfield_b,
+        defense_a: json.defense_a,
+        defense_b: json.defense_b,
+        position_diff: json.position_diff,
+        rating_weight: json.RATING_WEIGHT || 10,
+        objective: json.objective,
       };
     }
   }
@@ -307,6 +468,7 @@ solveBtn.addEventListener('click', async () => {
   }
 
   const solver = solverSelect.value;
+  const scenario = scenarioSelect?.value || 'ratings_only';
 
   // Show loading
   loading.classList.add('active');
@@ -321,7 +483,7 @@ solveBtn.addEventListener('click', async () => {
       const response = await fetch('/api/solve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ solver, csvData }),
+        body: JSON.stringify({ solver, scenario, csvData }),
       });
 
       data = await response.json();
@@ -330,31 +492,57 @@ solveBtn.addEventListener('click', async () => {
         throw new Error(data.error || 'Unknown error');
       }
 
-      displayResults(data, csvData);
+      displayResults(data, scenario);
     } else {
       // Use WASM
       const { players, data: modelData } = parseCSV(csvData);
-      const result = await solveWithWasm(solver, modelData);
+      const result = await solveWithWasm(solver, scenario, modelData);
 
-      // Calculate totals from assignment if not provided
+      // Build team rosters from assignment
       if (result.solution && result.solution.assignment) {
         const assignment = result.solution.assignment;
-        let totalA = 0, totalB = 0;
+        const teamA = [];
+        const teamB = [];
+        
         assignment.forEach((team, idx) => {
           if (idx < players.length) {
             if (team === 0) {
-              totalA += players[idx].rating;
+              teamA.push(players[idx]);
             } else {
-              totalB += players[idx].rating;
+              teamB.push(players[idx]);
             }
           }
         });
-        result.solution.total_rating_a = totalA;
-        result.solution.total_rating_b = totalB;
-        result.solution.rating_difference = Math.abs(totalA - totalB);
-      }
 
-      displayResults({ result }, csvData);
+        // Compute position counts from team rosters if not provided by solver
+        if (result.solution.forwards_a === undefined) {
+          result.solution.forwards_a = teamA.filter(p => p.position === 'forward').length;
+          result.solution.forwards_b = teamB.filter(p => p.position === 'forward').length;
+          result.solution.midfield_a = teamA.filter(p => p.position === 'midfield').length;
+          result.solution.midfield_b = teamB.filter(p => p.position === 'midfield').length;
+          result.solution.defense_a = teamA.filter(p => p.position === 'defense').length;
+          result.solution.defense_b = teamB.filter(p => p.position === 'defense').length;
+          
+          // Compute position_diff
+          result.solution.position_diff = 
+            Math.abs(result.solution.forwards_a - result.solution.forwards_b) +
+            Math.abs(result.solution.midfield_a - result.solution.midfield_b) +
+            Math.abs(result.solution.defense_a - result.solution.defense_b);
+        }
+
+        // Set default rating_weight if not provided
+        if (result.solution.rating_weight === undefined) {
+          result.solution.rating_weight = 10;
+        }
+
+        displayResults({
+          result,
+          players,
+          teamA: sortPlayers(teamA),
+          teamB: sortPlayers(teamB),
+          scenario,
+        }, scenario);
+      }
     }
   } catch (error) {
     console.error('Solve error:', error);
@@ -369,68 +557,59 @@ solveBtn.addEventListener('click', async () => {
 // Store last results for CSV download
 let lastResults = null;
 
-function displayResults(data, originalCsv) {
-  const { result } = data;
+function displayResults(data, scenario) {
+  const { result, teamA, teamB, players } = data;
   const solution = result.solution;
 
-  // Parse original CSV to get player names
-  const lines = originalCsv.trim().split('\n');
-  const players = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    if (values.length >= 2) {
-      players.push({
-        name: values[0].trim(),
-        rating: parseInt(values[1].trim(), 10),
-        position: values[2] ? values[2].trim() : 'unknown',
-      });
-    }
-  }
-
-  // Get team assignments
-  const assignment = solution?.assignment || [];
-  const teamA = [];
-  const teamB = [];
-
-  assignment.forEach((team, idx) => {
-    if (idx < players.length) {
-      if (team === 0) {
-        teamA.push(players[idx]);
-      } else {
-        teamB.push(players[idx]);
-      }
-    }
-  });
-
-  // Sort teams alphabetically by name
-  teamA.sort((a, b) => a.name.localeCompare(b.name));
-  teamB.sort((a, b) => a.name.localeCompare(b.name));
+  // Sort teams by position then name
+  const sortedTeamA = sortPlayers(teamA);
+  const sortedTeamB = sortPlayers(teamB);
 
   // Calculate totals
-  const totalA = solution?.total_rating_a || teamA.reduce((sum, p) => sum + p.rating, 0);
-  const totalB = solution?.total_rating_b || teamB.reduce((sum, p) => sum + p.rating, 0);
+  const totalA = solution?.total_rating_a || sortedTeamA.reduce((sum, p) => sum + p.rating, 0);
+  const totalB = solution?.total_rating_b || sortedTeamB.reduce((sum, p) => sum + p.rating, 0);
   const diff = solution?.rating_difference || Math.abs(totalA - totalB);
+
+  // Calculate position-wise ratings for balanced_positions scenario
+  const forwardRatingA = sortedTeamA.filter(p => p.position === 'forward').reduce((s, p) => s + p.rating, 0);
+  const forwardRatingB = sortedTeamB.filter(p => p.position === 'forward').reduce((s, p) => s + p.rating, 0);
+  const midfieldRatingA = sortedTeamA.filter(p => p.position === 'midfield').reduce((s, p) => s + p.rating, 0);
+  const midfieldRatingB = sortedTeamB.filter(p => p.position === 'midfield').reduce((s, p) => s + p.rating, 0);
+  const defenseRatingA = sortedTeamA.filter(p => p.position === 'defense').reduce((s, p) => s + p.rating, 0);
+  const defenseRatingB = sortedTeamB.filter(p => p.position === 'defense').reduce((s, p) => s + p.rating, 0);
 
   // Store results for CSV download
   lastResults = {
-    teamA,
-    teamB,
+    teamA: sortedTeamA,
+    teamB: sortedTeamB,
     totalA,
     totalB,
     diff,
     solveTime: result.solveTime,
     status: result.status,
-    playerCount: players.length,
+    playerCount: (players || []).length || (sortedTeamA.length + sortedTeamB.length),
+    solution,
+    scenario,
+    positionRatings: {
+      forwardA: forwardRatingA, forwardB: forwardRatingB,
+      midfieldA: midfieldRatingA, midfieldB: midfieldRatingB,
+      defenseA: defenseRatingA, defenseB: defenseRatingB,
+    },
   };
 
-  // Update DOM
-  document.getElementById('teamATotal').textContent = `(${totalA} points)`;
-  document.getElementById('teamBTotal').textContent = `(${totalB} points)`;
+  // Update DOM - show position-wise breakdown for balanced_positions
+  if (scenario === 'balanced_positions') {
+    document.getElementById('teamATotal').textContent = `(F:${forwardRatingA} M:${midfieldRatingA} D:${defenseRatingA} = ${totalA})`;
+    document.getElementById('teamBTotal').textContent = `(F:${forwardRatingB} M:${midfieldRatingB} D:${defenseRatingB} = ${totalB})`;
+  } else {
+    document.getElementById('teamATotal').textContent = `(${totalA} rating points)`;
+    document.getElementById('teamBTotal').textContent = `(${totalB} rating points)`;
+  }
 
   const teamAList = document.getElementById('teamAList');
   const teamBList = document.getElementById('teamBList');
 
-  teamAList.innerHTML = teamA
+  teamAList.innerHTML = sortedTeamA
     .map(
       (p, idx) => `
     <li>
@@ -442,7 +621,7 @@ function displayResults(data, originalCsv) {
     )
     .join('');
 
-  teamBList.innerHTML = teamB
+  teamBList.innerHTML = sortedTeamB
     .map(
       (p, idx) => `
     <li>
@@ -457,19 +636,110 @@ function displayResults(data, originalCsv) {
   document.getElementById('ratingDiff').textContent = diff;
   document.getElementById('solveTime').textContent = result.solveTime;
   document.getElementById('status').textContent = result.status;
-  document.getElementById('playerCount').textContent = players.length;
+  document.getElementById('playerCount').textContent = lastResults.playerCount;
 
   // Show download button
   document.getElementById('downloadBtn').style.display = 'inline-block';
 
+  // Display solver output details
+  displaySolverOutput(solution, scenario, totalA, totalB, sortedTeamA, sortedTeamB);
+
   results.classList.add('active');
+}
+
+function displaySolverOutput(solution, scenario, totalA, totalB, teamA, teamB) {
+  const solverOutput = document.getElementById('solverOutput');
+  const solverOutputPre = document.getElementById('solverOutputPre');
+  
+  if (!solverOutput || !solverOutputPre) return;
+
+  // Calculate position-wise ratings
+  const forwardRatingA = teamA.filter(p => p.position === 'forward').reduce((s, p) => s + p.rating, 0);
+  const forwardRatingB = teamB.filter(p => p.position === 'forward').reduce((s, p) => s + p.rating, 0);
+  const midfieldRatingA = teamA.filter(p => p.position === 'midfield').reduce((s, p) => s + p.rating, 0);
+  const midfieldRatingB = teamB.filter(p => p.position === 'midfield').reduce((s, p) => s + p.rating, 0);
+  const defenseRatingA = teamA.filter(p => p.position === 'defense').reduce((s, p) => s + p.rating, 0);
+  const defenseRatingB = teamB.filter(p => p.position === 'defense').reduce((s, p) => s + p.rating, 0);
+
+  const forwardDiff = Math.abs(forwardRatingA - forwardRatingB);
+  const midfieldDiff = Math.abs(midfieldRatingA - midfieldRatingB);
+  const defenseDiff = Math.abs(defenseRatingA - defenseRatingB);
+
+  let output = '';
+  
+  output += '=== MiniZinc Solver Output ===\n\n';
+  
+  // Scenario name
+  let scenarioName = 'Ratings Only';
+  if (scenario === 'with_positions') scenarioName = 'Ratings + Positions';
+  if (scenario === 'balanced_positions') scenarioName = 'Position-wise Ratings';
+  output += `Scenario: ${scenarioName}\n`;
+  output += `Status: ${solution?.status || 'OPTIMAL'}\n\n`;
+  
+  output += '--- Rating Balance ---\n';
+  output += `Team A Total Rating: ${totalA}\n`;
+  output += `Team B Total Rating: ${totalB}\n`;
+  output += `Rating Difference: ${Math.abs(totalA - totalB)}\n\n`;
+  
+  if (scenario === 'with_positions' && solution) {
+    const ratingWeight = solution.rating_weight || 10;
+    
+    output += '--- Position Balance ---\n';
+    output += `Forwards:  Team A = ${solution.forwards_a ?? 'N/A'}, Team B = ${solution.forwards_b ?? 'N/A'} (diff: ${Math.abs((solution.forwards_a || 0) - (solution.forwards_b || 0))})\n`;
+    output += `Midfield:  Team A = ${solution.midfield_a ?? 'N/A'}, Team B = ${solution.midfield_b ?? 'N/A'} (diff: ${Math.abs((solution.midfield_a || 0) - (solution.midfield_b || 0))})\n`;
+    output += `Defense:   Team A = ${solution.defense_a ?? 'N/A'}, Team B = ${solution.defense_b ?? 'N/A'} (diff: ${Math.abs((solution.defense_a || 0) - (solution.defense_b || 0))})\n\n`;
+    
+    const positionDiff = solution.position_diff ?? (
+      Math.abs((solution.forwards_a || 0) - (solution.forwards_b || 0)) +
+      Math.abs((solution.midfield_a || 0) - (solution.midfield_b || 0)) +
+      Math.abs((solution.defense_a || 0) - (solution.defense_b || 0))
+    );
+    const ratingDiff = Math.abs(totalA - totalB);
+    const objectiveValue = solution.objective ?? (ratingDiff * ratingWeight + positionDiff);
+    
+    output += '--- Objective Function ---\n';
+    output += `Objective = rating_diff * ${ratingWeight} + position_diff\n`;
+    output += `         = ${ratingDiff} * ${ratingWeight} + ${positionDiff}\n`;
+    output += `         = ${objectiveValue}\n\n`;
+    output += `Note: Rating balance is prioritized (weight=${ratingWeight}) over position balance (weight=1).\n`;
+  }
+
+  if (scenario === 'balanced_positions') {
+    output += '--- Position-wise Rating Balance ---\n';
+    output += `Forwards:  Team A = ${forwardRatingA}, Team B = ${forwardRatingB} (diff: ${forwardDiff})\n`;
+    output += `Midfield:  Team A = ${midfieldRatingA}, Team B = ${midfieldRatingB} (diff: ${midfieldDiff})\n`;
+    output += `Defense:   Team A = ${defenseRatingA}, Team B = ${defenseRatingB} (diff: ${defenseDiff})\n\n`;
+    
+    const objectiveValue = forwardDiff + midfieldDiff + defenseDiff;
+    
+    output += '--- Objective Function ---\n';
+    output += `Objective = forward_rating_diff + midfield_rating_diff + defense_rating_diff\n`;
+    output += `         = ${forwardDiff} + ${midfieldDiff} + ${defenseDiff}\n`;
+    output += `         = ${objectiveValue}\n\n`;
+    output += `Note: Each position group is balanced for skill, ensuring equal strength at forwards, midfield, and defense.\n`;
+  }
+  
+  output += '\n--- Team Rosters (sorted by position, then name) ---\n\n';
+  
+  output += 'Team A:\n';
+  teamA.forEach((p, idx) => {
+    output += `  ${idx + 1}. ${p.name.padEnd(12)} | ${p.position.padEnd(8)} | Rating: ${p.rating}\n`;
+  });
+  
+  output += '\nTeam B:\n';
+  teamB.forEach((p, idx) => {
+    output += `  ${idx + 1}. ${p.name.padEnd(12)} | ${p.position.padEnd(8)} | Rating: ${p.rating}\n`;
+  });
+
+  solverOutputPre.textContent = output;
+  solverOutput.style.display = 'block';
 }
 
 // Download results as CSV
 function downloadResultsCSV() {
   if (!lastResults) return;
 
-  const { teamA, teamB, totalA, totalB, diff } = lastResults;
+  const { teamA, teamB, totalA, totalB, diff, scenario, solution } = lastResults;
   
   // Build CSV content
   const csvLines = [
@@ -487,9 +757,19 @@ function downloadResultsCSV() {
   // Add summary
   csvLines.push('');
   csvLines.push('Summary');
+  csvLines.push(`Scenario,${scenario === 'with_positions' ? 'Ratings + Positions' : 'Ratings Only'}`);
   csvLines.push(`Team A Total Rating,${totalA}`);
   csvLines.push(`Team B Total Rating,${totalB}`);
   csvLines.push(`Rating Difference,${diff}`);
+  
+  if (scenario === 'with_positions' && solution) {
+    csvLines.push(`Team A Forwards,${solution.forwards_a}`);
+    csvLines.push(`Team B Forwards,${solution.forwards_b}`);
+    csvLines.push(`Team A Midfield,${solution.midfield_a}`);
+    csvLines.push(`Team B Midfield,${solution.midfield_b}`);
+    csvLines.push(`Team A Defense,${solution.defense_a}`);
+    csvLines.push(`Team B Defense,${solution.defense_b}`);
+  }
 
   const csvContent = csvLines.join('\n');
   
