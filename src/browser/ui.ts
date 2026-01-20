@@ -2,33 +2,59 @@ import { MiniZincService } from '../solver/service.js';
 
 const service = new MiniZincService();
 
+let modelCodes: Record<string, string> = {};
+
 export async function initApp(): Promise<void> {
   try {
     await service.init();
     console.log('MiniZinc initialized in browser mode');
     console.log('Available solvers:', service.getAvailableSolvers());
+
+    await loadModels();
   } catch (error) {
     console.error('Failed to initialize MiniZinc:', error);
     throw error;
   }
 }
 
+async function loadModels(): Promise<void> {
+  const loadModel = async (filename: string): Promise<string> => {
+    const response = await fetch(`./${filename}`);
+    if (!response.ok) {
+      throw new Error(`Failed to load model: ${filename}`);
+    }
+    return response.text();
+  };
+
+  modelCodes = {
+    ratings_only: await loadModel('team_assignment_ratings_only.mzn'),
+    with_positions: await loadModel('team_assignment_with_positions.mzn'),
+  };
+
+  console.log('Loaded models:', Object.keys(modelCodes));
+}
+
 export async function solveModel(
-  modelCode: string,
+  scenario: string,
   data: any,
   solver: string,
   onProgress?: (status: string) => void,
   onSolution?: (solution: any) => void,
   onStatistics?: (stats: any) => void,
 ): Promise<any> {
+  const modelCode = modelCodes[scenario];
+  if (!modelCode) {
+    throw new Error(`Unknown scenario: ${scenario}. Available: ${Object.keys(modelCodes).join(', ')}`);
+  }
+
   try {
     const config = {
-      solver: solver as 'gecode' | 'chuffed' | 'cbc',
+      solver: solver as 'gecode' | 'chuffed' | 'cbc' | 'coinbc' | 'cp-sat',
       timeLimit: 10000,
     };
 
     if (onProgress) {
-      onProgress(`Starting solver with ${solver}...`);
+      onProgress(`Starting ${solver} solver for ${scenario} scenario...`);
     }
 
     const result = await service.solve(modelCode, data, config);
@@ -60,6 +86,10 @@ export function getCurrentMode(): string {
   return service.getMode();
 }
 
+export function getScenarios(): string[] {
+  return Object.keys(modelCodes);
+}
+
 export function parseCSV(csvText: string): any {
   const lines = csvText.trim().split('\n');
   if (lines.length < 2) {
@@ -78,27 +108,36 @@ export function parseCSV(csvText: string): any {
   const players: any[] = [];
   const ratings: number[] = [];
   const positions: string[] = [];
+  const positionIndices: number[] = [];
+
+  const positionMap: Record<string, number> = {
+    'forward': 1,
+    'defense': 3,
+    'midfield': 2,
+  };
 
   for (let i = 1; i < lines.length; i++) {
     const values = lines[i].split(',');
     if (values.length >= 2) {
       const player = values[nameIdx]?.trim() || `Player ${i}`;
       const rating = parseInt(values[ratingIdx]?.trim(), 10);
-      const position = positionIdx !== -1 ? values[positionIdx]?.trim() || 'unknown' : 'unknown';
+      const position = positionIdx !== -1 ? values[positionIdx]?.trim()?.toLowerCase() || 'unknown' : 'unknown';
 
       if (!isNaN(rating)) {
         players.push(player);
         ratings.push(rating);
         positions.push(position);
+        positionIndices.push(positionMap[position] || 0);
       }
     }
   }
 
   return {
     num_players: players.length,
-    players: players.map((p, i) => ({ name: p, rating: ratings[i], position: positions[i] })),
+    players: players.map((p, i) => ({ name: p, rating: ratings[i], position: positions[i], positionIndex: positionIndices[i] })),
     ratings,
     positions,
+    position_indices: positionIndices,
   };
 }
 
@@ -126,6 +165,12 @@ export function displayResults(solution: any): void {
       }
 
       console.log(`\nRating Difference: ${sol.rating_difference}`);
+
+      if (sol.forwards_a !== undefined) {
+        console.log('\nPosition Distribution:');
+        console.log(`  Team A: ${sol.forwards_a} forwards, ${sol.midfield_a} midfield, ${sol.defense_a} defense`);
+        console.log(`  Team B: ${sol.forwards_b} forwards, ${sol.midfield_b} midfield, ${sol.defense_b} defense`);
+      }
     }
   } else {
     console.log(`Status: ${solution.status}`);

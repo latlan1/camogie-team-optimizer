@@ -564,9 +564,12 @@
       <p style="margin-top: 12px;">
         <strong>Objective:</strong> <code>minimize |total_rating_A - total_rating_B|</code>
       </p>
-      <p style="margin-top: 8px;">
-        <strong>Constraints:</strong> Equal team sizes (or differ by at most 1 player)
-      </p>
+        <p style="margin-top: 8px;">
+          <strong>Constraints:</strong> Equal team sizes (or differ by at most 1 player)
+        </p>
+        <p style="margin-top: 8px; font-size: 13px; opacity: 0.9;" id="scenarioDescription">
+          <strong>Scenario:</strong> Ratings Only - Teams balanced by total skill rating only.
+        </p>
     </div>
 
     <!-- Main Card -->
@@ -593,6 +596,15 @@
           <div class="upload-hint">CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)</div>
           <div class="file-name" id="fileName"></div>
         </div>
+      </div>
+
+      <!-- Scenario Selection -->
+      <div class="form-group">
+        <label for="scenario">Select Optimization Scenario</label>
+        <select id="scenario">
+          <option value="ratings_only">Ratings Only - Balance teams by total skill rating</option>
+          <option value="with_positions">Ratings + Positions - Balance ratings AND position distribution</option>
+        </select>
       </div>
 
       <!-- Solver Selection -->

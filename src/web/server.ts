@@ -9,16 +9,22 @@ const port = 3000;
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
+app.get('/api/scenarios', (req, res) => {
+  res.json({
+    scenarios: [
+      { id: 'ratings_only', name: 'Ratings Only', description: 'Balance teams by total skill rating only' },
+      { id: 'with_positions', name: 'Ratings + Positions', description: 'Balance ratings AND position distribution' },
+    ],
+  });
+});
+
 app.get('/', (req, res) => {
   res.sendFile(resolve('public/index.html'));
 });
 
 app.post('/api/solve', async (req, res) => {
   try {
-    const { solver = 'gecode', csvData } = req.body;
-
-    // Fallback: if requested solver isn’t available in local install, suggest coinbc
-    const preferredSolver = solver;
+    const { solver = 'gecode', csvData, scenario = 'ratings_only' } = req.body;
 
     if (!csvData) {
       return res.status(400).json({ error: 'CSV data is required' });
@@ -29,11 +35,19 @@ app.post('/api/solve', async (req, res) => {
       minizinc: process.env.MINIZINC_BIN || 'minizinc',
     });
 
-    const modelCode = readFileSync(resolve('./models/team-assignment.mzn'), 'utf8');
+    const modelFilename = scenario === 'with_positions'
+      ? 'team_assignment_with_positions.mzn'
+      : 'team_assignment_ratings_only.mzn';
+    const modelCode = readFileSync(resolve(`./models/${modelFilename}`), 'utf8');
     const data = parseCSV(csvData);
 
     if (!data.position_indices) {
-      data.position_indices = data.positions.map((_, idx) => idx + 1);
+      const positionMap: Record<string, number> = {
+        'forward': 1,
+        'midfield': 2,
+        'defense': 3,
+      };
+      data.position_indices = data.positions.map((p: string) => positionMap[p.toLowerCase()] || 0);
     }
 
     const config = {
@@ -41,10 +55,11 @@ app.post('/api/solve', async (req, res) => {
       timeLimit: 10000,
     };
 
-    const result = await service.solve(modelCode, data, config);
+    const result = await service.solve(modelCode, data, config, modelFilename);
 
     res.json({
       solver,
+      scenario,
       mode: service.getMode(),
       result,
     });

@@ -46,7 +46,7 @@ export class MiniZincService {
     return true;
   }
 
-  async solve(modelCode: string, data: ModelData, config: SolverConfig): Promise<SolverResult> {
+  async solve(modelCode: string, data: ModelData, config: SolverConfig, modelFilename: string = 'model.mzn'): Promise<SolverResult> {
     if (!this.initialized) {
       await this.init();
     }
@@ -63,7 +63,7 @@ export class MiniZincService {
 
     try {
       const model = new MiniZinc.Model();
-      model.addFile('team-assignment.mzn', modelCode);
+      model.addFile(modelFilename, modelCode);
       model.addJson(data);
 
       const solve = model.solve({
