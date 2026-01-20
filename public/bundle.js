@@ -597,10 +597,10 @@ function displayResults(data, scenario) {
     },
   };
 
-  // Update DOM - show position-wise breakdown for balanced_positions
+   // Update DOM - show position-wise breakdown for balanced_positions
   if (scenario === 'balanced_positions') {
-    document.getElementById('teamATotal').textContent = `(Defense: ${defenseRatingA}, Midfield: ${midfieldRatingA}, Forward: ${forwardRatingA} = ${totalA} rating points)`;
-    document.getElementById('teamBTotal').textContent = `(Defense: ${defenseRatingB}, Midfield: ${midfieldRatingB}, Forward: ${forwardRatingB} = ${totalB} rating points)`;
+    document.getElementById('teamATotal').textContent = `(D: ${defenseRatingA}, M: ${midfieldRatingA}, F: ${forwardRatingA} = ${totalA} rating points)`;
+    document.getElementById('teamBTotal').textContent = `(D: ${defenseRatingB}, M: ${midfieldRatingB}, F: ${forwardRatingB} = ${totalB} rating points)`;
   } else {
     document.getElementById('teamATotal').textContent = `(${totalA} rating points)`;
     document.getElementById('teamBTotal').textContent = `(${totalB} rating points)`;
