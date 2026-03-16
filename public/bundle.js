@@ -953,6 +953,464 @@ function sortPlayers(players) {
   });
 }
 
+function normalizePosition(position) {
+  const pos = String(position || '').toLowerCase().trim();
+  if (pos === 'gk' || pos === 'keeper' || pos === 'goalkeeper' || pos === 'goal keeper') {
+    return 'goalkeeper';
+  }
+  if (pos.startsWith('def')) return 'defense';
+  if (pos.startsWith('mid')) return 'midfield';
+  if (pos.startsWith('for')) return 'forward';
+  return 'unknown';
+}
+
+function stableNameSort(players) {
+  return [...players].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function splitTeamForField(players) {
+  const normalized = players.map((p) => ({ ...p, _normPos: normalizePosition(p.position) }));
+  let goalkeeper = normalized.find((p) => p._normPos === 'goalkeeper') || null;
+  const remaining = [...normalized];
+
+  if (goalkeeper) {
+    const idx = remaining.findIndex((p) => p.name === goalkeeper.name);
+    if (idx >= 0) remaining.splice(idx, 1);
+  }
+
+  let defense = stableNameSort(remaining.filter((p) => p._normPos === 'defense'));
+  const midfield = stableNameSort(remaining.filter((p) => p._normPos === 'midfield'));
+  const forward = stableNameSort(remaining.filter((p) => p._normPos === 'forward'));
+
+  if (!goalkeeper && defense.length > 0) {
+    goalkeeper = defense[0];
+    defense = defense.slice(1);
+  }
+
+  return {
+    goalkeeper,
+    lanes: { defense, midfield, forward },
+  };
+}
+
+function createSvgElement(tag, attrs = {}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, String(v)));
+  return el;
+}
+
+function initialsFromName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+}
+
+function getLabelOffsets(number, team) {
+  const parsed = Number(number);
+  const idx = Number.isFinite(parsed) ? Math.abs(parsed) % 4 : 0;
+  const redOffsets = [
+    { dx: -48, dy: -16 },
+    { dx: -54, dy: -4 },
+    { dx: -50, dy: 10 },
+    { dx: -44, dy: -10 },
+  ];
+  const whiteOffsets = [
+    { dx: 16, dy: -16 },
+    { dx: 20, dy: -2 },
+    { dx: 14, dy: 12 },
+    { dx: 18, dy: -10 },
+  ];
+  return team === 'red' ? redOffsets[idx] : whiteOffsets[idx];
+}
+
+function drawToken(svg, x, y, number, team, label = '', isCaptain = false) {
+  const isRed = team === 'red';
+  const circle = createSvgElement('circle', {
+    cx: x,
+    cy: y,
+    r: 11,
+    fill: isRed ? '#dc2626' : '#ffffff',
+    stroke: isCaptain ? '#2563eb' : isRed ? '#7f1d1d' : '#1f2937',
+    'stroke-width': isCaptain ? 3 : 1.2,
+  });
+  svg.appendChild(circle);
+
+  const txt = createSvgElement('text', {
+    x,
+    y,
+    'text-anchor': 'middle',
+    'dominant-baseline': 'central',
+    'font-size': 10,
+    'font-family': 'Inter, system-ui, sans-serif',
+    fill: isRed ? '#ffffff' : '#1f2937',
+    'font-weight': 700,
+  });
+  txt.textContent = String(number);
+  svg.appendChild(txt);
+
+  if (label) {
+    const { dx, dy } = getLabelOffsets(number, team);
+    const labelX = x + dx;
+    const labelY = y + dy;
+    const labelWidth = Math.max(38, Math.round(label.length * 5.8));
+
+    const labelBg = createSvgElement('rect', {
+      x: labelX - 2,
+      y: labelY - 8,
+      width: labelWidth,
+      height: 14,
+      rx: 3,
+      fill: '#ffffff',
+      stroke: '#d1d5db',
+      'stroke-width': 0.6,
+      opacity: 0.95,
+    });
+    svg.appendChild(labelBg);
+
+    const initText = createSvgElement('text', {
+      x: labelX,
+      y: labelY,
+      'text-anchor': 'start',
+      'dominant-baseline': 'central',
+      'font-size': 9,
+      'font-family': 'Inter, system-ui, sans-serif',
+      fill: '#374151',
+      'font-weight': 600,
+    });
+    initText.textContent = label;
+    svg.appendChild(initText);
+  }
+}
+
+function splitFullHalf(players) {
+  const sorted = stableNameSort(players);
+  const fullCount = Math.max(1, Math.floor(sorted.length / 2));
+  return {
+    full: sorted.slice(0, fullCount),
+    half: sorted.slice(fullCount),
+  };
+}
+
+function drawPairGroup(
+  svg,
+  redPlayers,
+  whitePlayers,
+  anchorX,
+  centerY,
+  side,
+  redPositionAbbr,
+  whitePositionAbbr,
+  fieldBottomY
+) {
+  const pairGap = 34;
+  const rowGap = 44;
+  const pairCount = Math.min(redPlayers.length, whitePlayers.length);
+  const startY = centerY - ((Math.max(pairCount, 1) - 1) * rowGap) / 2;
+
+  for (let i = 0; i < pairCount; i++) {
+    const y = startY + i * rowGap;
+    const red = redPlayers[i];
+    const white = whitePlayers[i];
+    const redNum = red?.displayNumber || i + 1;
+    const whiteNum = white?.displayNumber || i + 1;
+    drawToken(
+      svg,
+      anchorX,
+      y,
+      redNum,
+      'red',
+      `${initialsFromName(red?.name)} (${redPositionAbbr})`,
+      !!red?.isCaptain
+    );
+    drawToken(
+      svg,
+      anchorX + pairGap,
+      y,
+      whiteNum,
+      'white',
+      `${initialsFromName(white?.name)} (${whitePositionAbbr})`,
+      !!white?.isCaptain
+    );
+  }
+
+  // Overflow off-field, near expected play side/lane
+  const overflowRed = redPlayers.slice(pairCount);
+  const overflowWhite = whitePlayers.slice(pairCount);
+
+  const overflowBaseX = anchorX;
+  const overflowRedY = fieldBottomY + (side === 'left' ? 16 : side === 'right' ? 42 : 28);
+  const overflowWhiteY = overflowRedY + 22;
+
+  overflowRed.forEach((p, idx) => {
+    const x = overflowBaseX + idx * 34;
+    const n = p?.displayNumber || pairCount + idx + 1;
+    drawToken(
+      svg,
+      x,
+      overflowRedY,
+      n,
+      'red',
+      `${initialsFromName(p?.name)} (${redPositionAbbr})`,
+      !!p?.isCaptain
+    );
+  });
+
+  overflowWhite.forEach((p, idx) => {
+    const x = overflowBaseX + 16 + idx * 34;
+    const n = p?.displayNumber || pairCount + idx + 1;
+    drawToken(
+      svg,
+      x,
+      overflowWhiteY,
+      n,
+      'white',
+      `${initialsFromName(p?.name)} (${whitePositionAbbr})`,
+      !!p?.isCaptain
+    );
+  });
+}
+
+function renderCombinedField(teamAPlayers, teamBPlayers) {
+  const svg = document.getElementById('teamFieldSvg');
+  if (!svg) return;
+  svg.innerHTML = '';
+
+  const a = splitTeamForField(teamAPlayers);
+  const b = splitTeamForField(teamBPlayers);
+
+  const field = { x: 80, y: 50, w: 820, h: 300 };
+
+  const outer = createSvgElement('rect', {
+    x: 20,
+    y: 18,
+    width: 940,
+    height: 384,
+    rx: 12,
+    fill: '#f8fafc',
+    stroke: '#d1d5db',
+  });
+  svg.appendChild(outer);
+
+  const fieldRect = createSvgElement('rect', {
+    x: field.x,
+    y: field.y,
+    width: field.w,
+    height: field.h,
+    rx: 8,
+    fill: '#ecfdf5',
+    stroke: '#86efac',
+  });
+  svg.appendChild(fieldRect);
+
+  const fiftyLeft = createSvgElement('line', {
+    x1: field.x + 180,
+    y1: field.y,
+    x2: field.x + 180,
+    y2: field.y + field.h,
+    stroke: '#22c55e',
+    'stroke-width': 1,
+    opacity: 0.7,
+  });
+  const fiftyRight = createSvgElement('line', {
+    x1: field.x + field.w - 180,
+    y1: field.y,
+    x2: field.x + field.w - 180,
+    y2: field.y + field.h,
+    stroke: '#22c55e',
+    'stroke-width': 1,
+    opacity: 0.7,
+  });
+  svg.appendChild(fiftyLeft);
+  svg.appendChild(fiftyRight);
+
+  const halfway = createSvgElement('line', {
+    x1: field.x + field.w / 2,
+    y1: field.y,
+    x2: field.x + field.w / 2,
+    y2: field.y + field.h,
+    stroke: '#6ee7b7',
+    'stroke-width': 1.4,
+  });
+  svg.appendChild(halfway);
+
+  const centerOuter = createSvgElement('circle', {
+    cx: field.x + field.w / 2,
+    cy: field.y + field.h / 2,
+    r: 42,
+    fill: 'none',
+    stroke: '#22c55e',
+    'stroke-width': 1,
+  });
+  const centerInner = createSvgElement('circle', {
+    cx: field.x + field.w / 2,
+    cy: field.y + field.h / 2,
+    r: 6,
+    fill: '#22c55e',
+  });
+  svg.appendChild(centerOuter);
+  svg.appendChild(centerInner);
+
+  // Small and large rectangles near goals
+  const leftSmall = createSvgElement('rect', {
+    x: field.x,
+    y: field.y + field.h / 2 - 36,
+    width: 60,
+    height: 72,
+    fill: 'none',
+    stroke: '#22c55e',
+    'stroke-width': 1,
+  });
+  const leftLarge = createSvgElement('rect', {
+    x: field.x,
+    y: field.y + field.h / 2 - 72,
+    width: 120,
+    height: 144,
+    fill: 'none',
+    stroke: '#22c55e',
+    'stroke-width': 1,
+  });
+  const rightSmall = createSvgElement('rect', {
+    x: field.x + field.w - 60,
+    y: field.y + field.h / 2 - 36,
+    width: 60,
+    height: 72,
+    fill: 'none',
+    stroke: '#22c55e',
+    'stroke-width': 1,
+  });
+  const rightLarge = createSvgElement('rect', {
+    x: field.x + field.w - 120,
+    y: field.y + field.h / 2 - 72,
+    width: 120,
+    height: 144,
+    fill: 'none',
+    stroke: '#22c55e',
+    'stroke-width': 1,
+  });
+  svg.appendChild(leftSmall);
+  svg.appendChild(leftLarge);
+  svg.appendChild(rightSmall);
+  svg.appendChild(rightLarge);
+
+  const leftGoal = createSvgElement('rect', {
+    x: field.x - 12,
+    y: field.y + field.h / 2 - 32,
+    width: 12,
+    height: 64,
+    fill: '#b91c1c',
+  });
+  const rightGoal = createSvgElement('rect', {
+    x: field.x + field.w,
+    y: field.y + field.h / 2 - 32,
+    width: 12,
+    height: 64,
+    fill: '#e5e7eb',
+  });
+  svg.appendChild(leftGoal);
+  svg.appendChild(rightGoal);
+
+  const leftLabel = createSvgElement('text', {
+    x: field.x + 6,
+    y: field.y - 12,
+    'font-size': 12,
+    fill: '#991b1b',
+    'font-family': 'Inter, system-ui, sans-serif',
+    'font-weight': 600,
+  });
+  leftLabel.textContent = 'Red goal (Team A defends)';
+  svg.appendChild(leftLabel);
+
+  const rightLabel = createSvgElement('text', {
+    x: field.x + field.w - 232,
+    y: field.y - 12,
+    'font-size': 12,
+    fill: '#374151',
+    'font-family': 'Inter, system-ui, sans-serif',
+    'font-weight': 600,
+  });
+  rightLabel.textContent = 'White goal (Team A attacks)';
+  svg.appendChild(rightLabel);
+
+  // Goalkeepers are intentionally not drawn as markers.
+
+  const aDefense = splitFullHalf(a.lanes.defense || []);
+  const bDefense = splitFullHalf(b.lanes.defense || []);
+  const aForward = splitFullHalf(a.lanes.forward || []);
+  const bForward = splitFullHalf(b.lanes.forward || []);
+
+  // Team A defense vs Team B offense (left side)
+  drawPairGroup(
+    svg,
+    aDefense.full,
+    bForward.full,
+    170,
+    115,
+    'left',
+    'FB',
+    'FF',
+    field.y + field.h
+  );
+  drawPairGroup(
+    svg,
+    aDefense.half,
+    bForward.half,
+    300,
+    185,
+    'left',
+    'HB',
+    'HF',
+    field.y + field.h
+  );
+
+  // Midfield (center)
+  drawPairGroup(
+    svg,
+    a.lanes.midfield || [],
+    b.lanes.midfield || [],
+    470,
+    225,
+    'mid',
+    'MF',
+    'MF',
+    field.y + field.h
+  );
+
+  // Team A offense vs Team B defense (right side)
+  drawPairGroup(
+    svg,
+    aForward.half,
+    bDefense.half,
+    630,
+    265,
+    'right',
+    'HF',
+    'HB',
+    field.y + field.h
+  );
+  drawPairGroup(
+    svg,
+    aForward.full,
+    bDefense.full,
+    770,
+    305,
+    'right',
+    'FF',
+    'FB',
+    field.y + field.h
+  );
+
+  const overflowLabel = createSvgElement('text', {
+    x: 34,
+    y: 388,
+    'font-size': 11,
+    fill: '#6b7280',
+    'font-family': 'Inter, system-ui, sans-serif',
+  });
+  overflowLabel.textContent = 'Sideline overflow (subs) appears along the bottom touchline across expected positions.';
+  svg.appendChild(overflowLabel);
+}
+
 // Solve using WASM
 async function solveWithWasm(solver, scenario, modelData) {
   if (!wasmInitialized || !MiniZinc) {
@@ -1176,8 +1634,8 @@ function displayResults(data, scenario) {
   const solution = result.solution;
 
   // Sort teams by position then name
-  const sortedTeamA = sortPlayers(teamA);
-  const sortedTeamB = sortPlayers(teamB);
+  const sortedTeamA = sortPlayers(teamA).map((p, idx) => ({ ...p, displayNumber: idx + 1 }));
+  const sortedTeamB = sortPlayers(teamB).map((p, idx) => ({ ...p, displayNumber: idx + 1 }));
 
   // Calculate totals
   const totalA = solution?.total_rating_a || sortedTeamA.reduce((sum, p) => sum + p.rating, 0);
@@ -1264,8 +1722,8 @@ function displayResults(data, scenario) {
     .map(
       (p, idx) => `
     <li>
-      <span class="player-number">${idx + 1}.</span>
-      <span class="player-name">${p.name}</span>
+      <span class="player-number">${p.displayNumber || idx + 1}.</span>
+      <span class="player-name">${p.name}${p.isCaptain ? '<span class="captain-badge">C</span>' : ''}</span>
       <span class="player-details">${
         isExpectedSkillScenario(scenario)
           ? `${p.position} - Active: ${(p.activeSkill ?? 0).toFixed(2)} | Exp: <span class="exp-tag exp-${p.experienceCategory || 'intermediate'}">${p.experience ?? p.rating} (${p.experienceCategory || 'intermediate'})</span>`
@@ -1280,8 +1738,8 @@ function displayResults(data, scenario) {
     .map(
       (p, idx) => `
     <li>
-      <span class="player-number">${idx + 1}.</span>
-      <span class="player-name">${p.name}</span>
+      <span class="player-number">${p.displayNumber || idx + 1}.</span>
+      <span class="player-name">${p.name}${p.isCaptain ? '<span class="captain-badge">C</span>' : ''}</span>
       <span class="player-details">${
         isExpectedSkillScenario(scenario)
           ? `${p.position} - Active: ${(p.activeSkill ?? 0).toFixed(2)} | Exp: <span class="exp-tag exp-${p.experienceCategory || 'intermediate'}">${p.experience ?? p.rating} (${p.experienceCategory || 'intermediate'})</span>`
@@ -1305,6 +1763,9 @@ function displayResults(data, scenario) {
 
   // Display solver output details
   displaySolverOutput(solution, scenario, totalA, totalB, sortedTeamA, sortedTeamB);
+
+  // Display combined field visualization
+  renderCombinedField(sortedTeamA, sortedTeamB);
 
   results.classList.add('active');
 }
