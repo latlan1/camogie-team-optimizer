@@ -398,6 +398,29 @@
       font-size: 13px;
     }
 
+    .exp-tag {
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 999px;
+      margin-left: 4px;
+      font-size: 12px;
+    }
+
+    .exp-novice {
+      color: #991b1b;
+      background: #fee2e2;
+    }
+
+    .exp-intermediate {
+      color: #92400e;
+      background: #fef3c7;
+    }
+
+    .exp-veteran {
+      color: #065f46;
+      background: #d1fae5;
+    }
+
     /* Stats */
     .stats-row {
       display: grid;
@@ -593,7 +616,7 @@
           <input type="file" id="fileInput" accept=".csv" />
           <div class="upload-icon">📁</div>
           <div class="upload-text">Click to upload or drag and drop</div>
-          <div class="upload-hint">CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)</div>
+          <div class="upload-hint" id="csvHint">CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)</div>
           <div class="file-name" id="fileName"></div>
         </div>
       </div>
@@ -605,6 +628,9 @@
           <option value="ratings_only">Ratings Only - Balance teams by total skill rating</option>
           <option value="with_positions">Ratings + Positions - Balance ratings AND position distribution</option>
           <option value="balanced_positions">Position-wise Ratings - Balance skill within each position</option>
+          <option value="expected_active_skill">Expected Active Skill (Attendance+TopTwo) - Balance active skill, attendance, and top players</option>
+          <option value="expected_active_skill_mip">Expected Active Skill (MIP) - MIP-friendly model for all solvers</option>
+          <option value="active_skill_plus">Active Skill Plus (Attendance+Top2+Friends+Captains) - Adds friend and captain constraints</option>
         </select>
       </div>
 
@@ -650,7 +676,7 @@
       <div class="stats-row">
         <div class="stat-item">
           <div class="value" id="ratingDiff">-</div>
-          <div class="label">Rating Difference</div>
+          <div class="label" id="diffLabel">Rating Difference</div>
         </div>
         <div class="stat-item">
           <div class="value" id="solveTime">-</div>

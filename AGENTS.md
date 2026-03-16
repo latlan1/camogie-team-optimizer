@@ -181,6 +181,44 @@ import { parseCSV, sortPlayersByPosition, splitIntoTeams, countPositions } from 
 | `ratings_only` | Ratings Only | `team_assignment_ratings_only.mzn` | Balance by total ratings only |
 | `with_positions` | Ratings + Positions | `team_assignment_with_positions.mzn` | Balance ratings AND position counts |
 | `balanced_positions` | Position-wise Ratings | `team_assignment_balanced_positions.mzn` | Balance ratings within each position |
+| `expected_active_skill` | Expected Active Skill (Attendance+TopTwo) | `team_assignment_expected_skill.mzn` | Original TopTwo/sort implementation; use cp-sat/chuffed |
+| `expected_active_skill_mip` | Expected Active Skill (MIP) | `team_assignment_expected_skill_mip.mzn` | MIP-friendly TopTwo implementation; runs on all local solvers |
+| `active_skill_plus` | Active Skill Plus (Attendance+Top2+Friends+Captains) | `team_assignment_active_skill_plus.mzn` | Adds friend pairing, captain split, and high-attendance constraints |
+
+### Expected Active Skill CSV Format
+
+For `expected_active_skill` and `expected_active_skill_mip`, use:
+
+```csv
+name,experience,attendance_weeks,position
+Sarah Murphy,8,6,forward
+Aoife Kelly,3,4,midfield
+```
+
+Rules:
+- `attendance_weeks` is integer `0..7`
+- probability is derived as `attendance_weeks / 7`
+- experience categories: novice (1-3), intermediate (4-7), veteran (8-10)
+
+For `active_skill_plus`, use:
+
+```csv
+name,experience,attendance_weeks,position,captain,friend_group_id
+Sarah Murphy,8,6,forward,1,0
+Aoife Kelly,3,4,midfield,0,1
+```
+
+Rules:
+- exactly 2 captains in the CSV (`captain` = `1|true|yes`)
+- each team gets exactly one captain
+- players with the same positive `friend_group_id` must stay on the same team
+- each team must have at least one high-attendance player (`attendance_weeks >= 6`)
+
+### Solver Restriction Note
+
+For `expected_active_skill` (original model), do not use `cbc`/`coinbc`.
+Reason: TopTwo is implemented with global sort + indicator coupling; MIP backends can struggle and return `UNKNOWN`.
+Use `expected_active_skill_mip` for CBC/COIN-BC.
 
 ## Testing New Features
 

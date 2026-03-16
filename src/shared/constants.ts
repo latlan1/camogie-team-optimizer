@@ -22,6 +22,27 @@ export const SCENARIOS = {
     description: 'Minimize rating difference within each position group (balanced skill per position)',
     modelFile: 'team_assignment_balanced_positions.mzn',
   },
+  expected_active_skill: {
+    id: 'expected_active_skill',
+    name: 'Expected Active Skill (Attendance+TopTwo)',
+    description:
+      'Original TopTwo/sort implementation for active skill, attendance, top two experience, and position distribution',
+    modelFile: 'team_assignment_expected_skill.mzn',
+  },
+  expected_active_skill_mip: {
+    id: 'expected_active_skill_mip',
+    name: 'Expected Active Skill (MIP)',
+    description:
+      'MIP-friendly TopTwo implementation designed to run across all local solvers',
+    modelFile: 'team_assignment_expected_skill_mip.mzn',
+  },
+  active_skill_plus: {
+    id: 'active_skill_plus',
+    name: 'Active Skill Plus (Attendance+Top2+Friends+Captains)',
+    description:
+      'Expected active skill with Top2, friend pairing, high-attendance coverage, and captain split constraints',
+    modelFile: 'team_assignment_active_skill_plus.mzn',
+  },
 } as const;
 
 export type ScenarioId = keyof typeof SCENARIOS;

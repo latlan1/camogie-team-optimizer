@@ -8,7 +8,7 @@
  * 
  * Options:
  *   --solver, -s    Solver to use (cbc, coinbc, cp-sat, chuffed, gecode, all)
- *   --scenario, -c  Scenario to run (ratings_only, with_positions, all)
+ *   --scenario, -c  Scenario to run (see --help for full list)
  *   --file, -f      CSV file path (default: data/test-players.csv)
  *   --help, -h      Show help
  * 
@@ -33,6 +33,7 @@ import {
 } from '../shared/constants.js';
 import {
   parseCSV,
+  validateCSVForScenario,
   sortPlayersByPosition,
   splitIntoTeams,
   countPositions,
@@ -45,6 +46,7 @@ interface CLIOptions {
   solver: string;
   scenario: string;
   file: string;
+  fileProvided: boolean;
   help: boolean;
 }
 
@@ -53,6 +55,7 @@ function parseArgs(args: string[]): CLIOptions {
     solver: DEFAULT_SOLVER,
     scenario: DEFAULT_SCENARIO,
     file: 'data/test-players.csv',
+    fileProvided: false,
     help: false,
   };
 
@@ -79,6 +82,7 @@ function parseArgs(args: string[]): CLIOptions {
       case '-f':
         if (nextArg) {
           options.file = nextArg;
+          options.fileProvided = true;
           i++;
         }
         break;
@@ -140,16 +144,35 @@ async function runSolve(
   service: MiniZincService,
   solver: string,
   scenarioId: ScenarioId,
-  csvPath: string
+  csvPath: string,
+  isDefaultCsvPath: boolean
 ): Promise<void> {
   const scenario = SCENARIOS[scenarioId];
+
+  const resolvedCsvPath =
+    isDefaultCsvPath
+      ? scenarioId === 'active_skill_plus'
+        ? 'data/test-players-active-skill-plus.csv'
+        : scenarioId === 'expected_active_skill' || scenarioId === 'expected_active_skill_mip'
+          ? 'data/test-players-expected-skill.csv'
+          : csvPath
+      : csvPath;
   
   console.log(`\n${'='.repeat(60)}`);
   console.log(`Solver: ${solver.toUpperCase()} | Scenario: ${scenario.name}`);
   console.log(`${'='.repeat(60)}`);
 
   // Load model and data
-  const modelPath = path.resolve(`./models/${scenario.modelFile}`);
+  if (scenarioId === 'expected_active_skill' && (solver === 'cbc' || solver === 'coinbc')) {
+    console.error(
+      '\nCBC/COIN-BC are disabled for expected_active_skill. This original model uses global sort constraints with indicator coupling, which MIP backends often struggle to prove/close and may return UNKNOWN. Use scenario expected_active_skill_mip instead.'
+    );
+    return;
+  }
+
+  const modelFile: string = scenario.modelFile;
+
+  const modelPath = path.resolve(`./models/${modelFile}`);
   if (!fs.existsSync(modelPath)) {
     console.error(`Model file not found: ${modelPath}`);
     return;
@@ -158,16 +181,35 @@ async function runSolve(
   const modelCode = fs.readFileSync(modelPath, 'utf8');
   
   // Load and parse CSV
-  const csvFullPath = path.resolve(csvPath);
+  const csvFullPath = path.resolve(resolvedCsvPath);
   if (!fs.existsSync(csvFullPath)) {
     console.error(`CSV file not found: ${csvFullPath}`);
     return;
   }
   
   const csvData = fs.readFileSync(csvFullPath, 'utf8');
+  const headerLine = csvData.trim().split('\n')[0] || '';
+  const csvHeaders = headerLine.split(',').map((h) => h.trim());
+  const csvValidation = validateCSVForScenario(csvHeaders, scenarioId);
+  if (!csvValidation.valid) {
+    console.error(`\nCSV validation failed for scenario "${scenarioId}":`);
+    console.error(csvValidation.error);
+    return;
+  }
+
   const data = parseCSV(csvData);
-  
-  console.log(`\nLoaded ${data.num_players} players from ${csvPath}`);
+
+  if (scenarioId === 'active_skill_plus') {
+    const captains = (data.is_captain || []).reduce((sum, c) => sum + c, 0);
+    if (captains !== 2) {
+      console.error(
+        `\nActive Skill Plus requires exactly 2 captains in CSV (captain=1/true/yes). Found ${captains}.`
+      );
+      return;
+    }
+  }
+
+  console.log(`\nLoaded ${data.num_players} players from ${resolvedCsvPath}`);
 
   // Check solver availability
   const available = service.getAvailableSolvers();
@@ -178,11 +220,16 @@ async function runSolve(
 
   const config: SolverConfig = {
     solver: solver as SolverConfig['solver'],
-    timeLimit: DEFAULT_TIME_LIMIT,
+    timeLimit:
+      scenarioId === 'expected_active_skill' ||
+      scenarioId === 'expected_active_skill_mip' ||
+      scenarioId === 'active_skill_plus'
+        ? 60000
+        : DEFAULT_TIME_LIMIT,
   };
 
   try {
-    const result = await service.solve(modelCode, data, config, scenario.modelFile);
+    const result = await service.solve(modelCode, data, config, modelFile);
 
     if (result.status === 'ERROR') {
       console.error(`\nError: ${result.errorMessage || 'Solver failed'}`);
@@ -270,6 +317,47 @@ async function runSolve(
           console.log(`           = ${forwardDiff} + ${midfieldDiff} + ${defenseDiff}`);
           console.log(`           = ${objective}`);
         }
+
+        if (
+          scenarioId === 'expected_active_skill' ||
+          scenarioId === 'expected_active_skill_mip' ||
+          scenarioId === 'active_skill_plus'
+        ) {
+          const activeSkillA = (solution.active_skill_a ?? 0) / 1000;
+          const activeSkillB = (solution.active_skill_b ?? 0) / 1000;
+          const activeSkillDiff = (solution.active_skill_diff ?? 0) / 1000;
+          const attendAWeeks = ((solution.attend_a ?? 0) / 100) * 7;
+          const attendBWeeks = ((solution.attend_b ?? 0) / 100) * 7;
+          const attendDiffWeeks = ((solution.attend_diff ?? 0) / 100) * 7;
+          const topTwoA = (solution.top_two_a ?? 0) / 10;
+          const topTwoB = (solution.top_two_b ?? 0) / 10;
+          const topTwoDiff = (solution.top_two_diff ?? 0) / 10;
+
+          console.log(`\nExpected Active Skill Metrics:`);
+          console.log(`  Team A active skill: ${activeSkillA.toFixed(2)}`);
+          console.log(`  Team B active skill: ${activeSkillB.toFixed(2)}`);
+          console.log(`  Active skill diff: ${activeSkillDiff.toFixed(2)}`);
+
+          console.log(`\nAttendance Metrics:`);
+          console.log(`  Team A expected attendance: ${attendAWeeks.toFixed(1)} weeks`);
+          console.log(`  Team B expected attendance: ${attendBWeeks.toFixed(1)} weeks`);
+          console.log(`  Attendance diff: ${attendDiffWeeks.toFixed(1)} weeks`);
+
+          console.log(`\nTopTwo Metrics:`);
+          console.log(`  Team A top-two experience: ${topTwoA.toFixed(1)}`);
+          console.log(`  Team B top-two experience: ${topTwoB.toFixed(1)}`);
+          console.log(`  Top-two diff: ${topTwoDiff.toFixed(1)}`);
+
+          if (scenarioId === 'active_skill_plus') {
+            const captainsA = teamA.filter((p) => p.isCaptain).length;
+            const captainsB = teamB.filter((p) => p.isCaptain).length;
+            const highAttendA = teamA.filter((p) => p.highAttendance).length;
+            const highAttendB = teamB.filter((p) => p.highAttendance).length;
+            console.log(`\nActive Skill Plus Constraints:`);
+            console.log(`  Captains split: Team A = ${captainsA}, Team B = ${captainsB}`);
+            console.log(`  High attendance players: Team A = ${highAttendA}, Team B = ${highAttendB}`);
+          }
+        }
       }
     }
 
@@ -289,6 +377,7 @@ async function runSolve(
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
+  const isDefaultCsvPath = !options.fileProvided;
 
   if (options.help) {
     showHelp();
@@ -326,8 +415,8 @@ async function main(): Promise<void> {
   // Run all combinations
   for (const solver of solversToTest) {
     for (const scenario of scenariosToTest) {
-      await runSolve(service, solver, scenario, options.file);
-      
+      await runSolve(service, solver, scenario, options.file, isDefaultCsvPath);
+
       // Small delay between runs
       if (solversToTest.length > 1 || scenariosToTest.length > 1) {
         await new Promise((resolve) => setTimeout(resolve, 500));

@@ -2,6 +2,15 @@ export interface Player {
   name: string;
   rating: number;
   position: string;
+  experience?: number;
+  attendanceWeeks?: number;
+  attendanceProbability?: number;
+  experienceCategory?: 'novice' | 'intermediate' | 'veteran';
+  attendanceCategory?: 'low' | 'mid' | 'high';
+  activeSkill?: number;
+  isCaptain?: boolean;
+  friendGroupId?: number;
+  highAttendance?: boolean;
 }
 
 export interface TeamAssignment {
@@ -19,6 +28,15 @@ export interface TeamAssignment {
   midfield_b?: number;
   defense_a?: number;
   defense_b?: number;
+  active_skill_a?: number;
+  active_skill_b?: number;
+  attend_a?: number;
+  attend_b?: number;
+  top_two_a?: number;
+  top_two_b?: number;
+  active_skill_diff?: number;
+  attend_diff?: number;
+  top_two_diff?: number;
 }
 
 export interface SolverConfig {
@@ -51,5 +69,10 @@ export interface ModelData {
   ratings: number[];
   positions: string[];
   position_indices?: number[];
+  experiences?: number[];
+  attendances?: number[];
+  is_captain?: number[];
+  friend_group_ids?: number[];
+  high_attendance_flags?: number[];
   players?: Player[];
 }

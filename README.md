@@ -54,9 +54,13 @@ camogie-team-minizinc-optimization/
 │   └── minizinc*.wasm          # WASM files from npm package
 ├── models/
 │   ├── team_assignment_ratings_only.mzn    # Balance by ratings only
-│   └── team_assignment_with_positions.mzn  # Balance ratings + positions
+│   ├── team_assignment_with_positions.mzn  # Balance ratings + positions
+│   ├── team_assignment_balanced_positions.mzn # Balance ratings within each position
+│   ├── team_assignment_expected_skill.mzn  # Original Expected Active Skill model
+│   └── team_assignment_expected_skill_mip.mzn # MIP-friendly Expected Active Skill model
 ├── data/
-│   └── test-players.csv        # Sample input data (20 players)
+│   ├── test-players.csv        # Legacy sample input data (name,rating,position)
+│   └── test-players-expected-skill.csv # Expected skill sample data (name,experience,attendance_weeks,position)
 ├── package.json
 ├── tsconfig.json
 ├── AGENTS.md
@@ -100,7 +104,7 @@ Open http://localhost:3000
 - CSV file upload and parsing
 - Live MiniZinc solving
 - All solvers: cbc, coinbc, cp-sat, chuffed
-- Scenario selection (Ratings Only / Ratings + Positions)
+- Scenario selection (Ratings Only / Ratings + Positions / Position-wise Ratings / Expected Active Skill variants)
 
 ---
 
@@ -122,7 +126,7 @@ Open http://localhost:8080
 - CSV file upload and parsing
 - MiniZinc solving via WASM (gecode, chuffed, cbc)
 - cp-sat NOT available (requires native binary)
-- Scenario selection (Ratings Only / Ratings + Positions)
+- Scenario selection (all scenarios, with solver restrictions for original expected_active_skill)
 
 ---
 
@@ -189,7 +193,7 @@ npx tsx src/cli/commands.ts -s all -c all --file data/test-players.csv
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--solver` | `-s` | `cbc` | Solver to use (cbc, coinbc, cp-sat, chuffed, gecode, all) |
-| `--scenario` | `-c` | `ratings_only` | Scenario to run (ratings_only, with_positions, balanced_positions, all) |
+| `--scenario` | `-c` | `ratings_only` | Scenario to run (ratings_only, with_positions, balanced_positions, expected_active_skill, expected_active_skill_mip, active_skill_plus, all) |
 | `--file` | `-f` | `data/test-players.csv` | Path to CSV file |
 | `--help` | `-h` | - | Show help message |
 
@@ -197,13 +201,48 @@ No server to stop - CLI commands exit automatically.
 
 ## Optimization Scenarios
 
-Three optimization scenarios are available:
+Six optimization scenarios are available:
 
 | Scenario | Model File | Description |
 |----------|------------|-------------|
 | **Ratings Only** | `team_assignment_ratings_only.mzn` | Minimize total rating difference between teams |
 | **Ratings + Positions** | `team_assignment_with_positions.mzn` | Minimize rating difference AND balance position counts |
 | **Position-wise Ratings** | `team_assignment_balanced_positions.mzn` | Minimize rating difference *within each position group* |
+| **Expected Active Skill (Attendance+TopTwo)** | `team_assignment_expected_skill.mzn` | Original model using TopTwo + sorting constraints |
+| **Expected Active Skill (MIP)** | `team_assignment_expected_skill_mip.mzn` | MIP-friendly TopTwo model for all local solvers |
+| **Active Skill Plus (Attendance+Top2+Friends+Captains)** | `team_assignment_active_skill_plus.mzn` | Adds friend pairing, captain split, and high-attendance constraints |
+
+### Expected Active Skill Notes
+
+- Input columns: `name,experience,attendance_weeks,position`
+- `attendance_probability = attendance_weeks / 7`
+- `active_skill = experience * attendance_probability`
+- Experience categories are derived as:
+  - `novice`: 1-3
+  - `intermediate`: 4-7
+  - `veteran`: 8-10
+
+Solver behavior for original scenario (`expected_active_skill`):
+
+- `cbc` and `coinbc` are intentionally disabled.
+- Reason: the original formulation uses global `sort` constraints with indicator-variable coupling for TopTwo, which MIP backends frequently struggle to close/prove and can return `UNKNOWN`.
+- Use:
+  - `expected_active_skill` with `cp-sat` or `chuffed`
+  - `expected_active_skill_mip` with `cbc`, `coinbc`, `cp-sat`, or `chuffed`
+
+### Active Skill Plus Constraints
+
+For `active_skill_plus`, input CSV must include:
+
+- `captain` (`1|true|yes` for captains)
+- `friend_group_id` (same positive ID means players must stay together)
+
+Model guarantees:
+
+- exactly 2 captains total
+- exactly 1 captain on each team
+- players with same positive friend group stay on same team
+- each team has at least one high-attendance player (`attendance_weeks >= 6`)
 
 ### Scenario Comparison
 
@@ -251,7 +290,9 @@ This ensures each position group is balanced in skill, not just player count.
 
 ## CSV Input Format
 
-The CSV should contain player data with these columns:
+The app supports two CSV formats.
+
+### Legacy format (existing scenarios)
 
 | Column | Type | Required | Description |
 |---------|-------|----------|-------------|
@@ -266,6 +307,43 @@ Alice,8,forward
 Bob,6,defense
 Charlie,7,midfield
 Diana,9,forward
+```
+
+### Expected skill format (`expected_active_skill`, `expected_active_skill_mip`)
+
+| Column | Type | Required | Description |
+|---------|-------|----------|-------------|
+| `name` | string | Yes | Player name |
+| `experience` | integer | Yes | Experience level (1-10) |
+| `attendance_weeks` | integer | Yes | Expected attendance (0-7) |
+| `position` | string | Yes | Position: forward, midfield, defense |
+
+Example:
+```csv
+name,experience,attendance_weeks,position
+Alice,8,6,forward
+Bob,5,4,defense
+Charlie,7,7,midfield
+```
+
+### Active Skill Plus format (`active_skill_plus`)
+
+| Column | Type | Required | Description |
+|---------|-------|----------|-------------|
+| `name` | string | Yes | Player name |
+| `experience` | integer | Yes | Experience level (1-10) |
+| `attendance_weeks` | integer | Yes | Expected attendance (0-7) |
+| `position` | string | Yes | Position: forward, midfield, defense |
+| `captain` | 0/1 or boolean-like | Yes | Must contain exactly two captains |
+| `friend_group_id` | integer | Yes | Same positive value means friends must stay together |
+
+Example:
+```csv
+name,experience,attendance_weeks,position,captain,friend_group_id
+Alice,8,6,forward,1,0
+Bob,5,4,defense,0,1
+Charlie,7,7,midfield,0,1
+Dana,9,6,forward,1,0
 ```
 
 ## API Endpoints (Local Mode)

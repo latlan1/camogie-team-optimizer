@@ -19,6 +19,15 @@ let csvData = null;
 let currentMode = 'local'; // 'local' or 'wasm'
 let wasmInitialized = false;
 let MiniZinc = null;
+const TOTAL_SEASON_WEEKS = 7;
+
+function isExpectedSkillScenario(scenario) {
+  return (
+    scenario === 'expected_active_skill' ||
+    scenario === 'expected_active_skill_mip' ||
+    scenario === 'active_skill_plus'
+  );
+}
 
 // MiniZinc model code (embedded for WASM mode)
 const RATINGS_ONLY_MODEL = `
@@ -146,23 +155,499 @@ var int: objective = forward_rating_diff + midfield_rating_diff + defense_rating
 solve minimize objective;
 `;
 
+const EXPECTED_ACTIVE_SKILL_MODEL = `
+include "globals.mzn";
+
+int: num_players;
+array[1..num_players] of int: experiences;
+array[1..num_players] of int: attendances;
+array[1..num_players] of int: position_indices;
+
+int: POS_FORWARD = 1;
+int: POS_MIDFIELD = 2;
+int: POS_DEFENSE = 3;
+
+int: W_ACTIVE = 60;
+int: W_ATTEND = 25;
+int: W_TOPTWO = 15;
+
+int: MAX_EXP = if num_players > 0 then max(experiences) else 0 endif;
+constraint num_players >= 4;
+
+array[1..num_players] of var 0..1: team_assignment;
+
+var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
+var int: team_b_size = num_players - team_a_size;
+constraint abs(team_a_size - team_b_size) <= 1;
+
+array[1..num_players] of int: active_skills = [experiences[p] * attendances[p] | p in 1..num_players];
+
+var int: active_skill_a = sum(p in 1..num_players)(active_skills[p] * (1 - team_assignment[p]));
+var int: active_skill_b = sum(p in 1..num_players)(active_skills[p] * team_assignment[p]);
+
+var int: attend_a = sum(p in 1..num_players)(attendances[p] * (1 - team_assignment[p]));
+var int: attend_b = sum(p in 1..num_players)(attendances[p] * team_assignment[p]);
+
+var int: forwards_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then (1 - team_assignment[p]) else 0 endif
+);
+
+var int: forwards_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then team_assignment[p] else 0 endif
+);
+var int: midfield_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then team_assignment[p] else 0 endif
+);
+var int: defense_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then team_assignment[p] else 0 endif
+);
+
+constraint abs(forwards_a - forwards_b) <= 1;
+constraint abs(midfield_a - midfield_b) <= 1;
+constraint abs(defense_a - defense_b) <= 1;
+
+array[1..num_players] of var 0..1: is_top2_a;
+array[1..num_players] of var 0..1: is_top2_b;
+
+constraint forall(p in 1..num_players)(is_top2_a[p] <= (1 - team_assignment[p]));
+constraint forall(p in 1..num_players)(is_top2_b[p] <= team_assignment[p]);
+constraint sum(p in 1..num_players)(is_top2_a[p]) = 2;
+constraint sum(p in 1..num_players)(is_top2_b[p]) = 2;
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  ((1 - team_assignment[i]) = 1 /\\ (1 - team_assignment[j]) = 1 /\\
+   is_top2_a[i] = 1 /\\ is_top2_a[j] = 0)
+  -> experiences[i] >= experiences[j]
+);
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  (team_assignment[i] = 1 /\\ team_assignment[j] = 1 /\\
+   is_top2_b[i] = 1 /\\ is_top2_b[j] = 0)
+  -> experiences[i] >= experiences[j]
+);
+
+array[1..num_players] of var 0..MAX_EXP: top2_exp_a_raw;
+array[1..num_players] of var 0..MAX_EXP: top2_exp_b_raw;
+
+constraint forall(p in 1..num_players)(top2_exp_a_raw[p] = experiences[p] * is_top2_a[p]);
+constraint forall(p in 1..num_players)(top2_exp_b_raw[p] = experiences[p] * is_top2_b[p]);
+
+array[1..num_players] of var 0..MAX_EXP: top2_exp_a_sorted;
+array[1..num_players] of var 0..MAX_EXP: top2_exp_b_sorted;
+
+constraint sort(top2_exp_a_raw, top2_exp_a_sorted);
+constraint sort(top2_exp_b_raw, top2_exp_b_sorted);
+
+var int: top_two_a = top2_exp_a_sorted[num_players] + top2_exp_a_sorted[num_players - 1];
+var int: top_two_b = top2_exp_b_sorted[num_players] + top2_exp_b_sorted[num_players - 1];
+
+var int: active_skill_diff = abs(active_skill_a - active_skill_b);
+var int: attend_diff = abs(attend_a - attend_b);
+var int: top_two_diff = abs(top_two_a - top_two_b);
+
+var int: objective =
+  W_ACTIVE * active_skill_diff +
+  W_ATTEND * attend_diff +
+  W_TOPTWO * top_two_diff;
+
+solve minimize objective;
+`;
+
+const EXPECTED_ACTIVE_SKILL_MIP_MODEL = `
+int: num_players;
+array[1..num_players] of int: experiences;
+array[1..num_players] of int: attendances;
+array[1..num_players] of int: position_indices;
+
+int: POS_FORWARD = 1;
+int: POS_MIDFIELD = 2;
+int: POS_DEFENSE = 3;
+
+int: W_ACTIVE = 60;
+int: W_ATTEND = 25;
+int: W_TOPTWO = 15;
+
+int: MAX_EXP = if num_players > 0 then max(experiences) else 0 endif;
+int: BIG_M = MAX_EXP + 1;
+constraint num_players >= 4;
+
+array[1..num_players] of var 0..1: team_assignment;
+
+var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
+var int: team_b_size = num_players - team_a_size;
+constraint abs(team_a_size - team_b_size) <= 1;
+
+array[1..num_players] of int: active_skills = [experiences[p] * attendances[p] | p in 1..num_players];
+
+var int: active_skill_a = sum(p in 1..num_players)(active_skills[p] * (1 - team_assignment[p]));
+var int: active_skill_b = sum(p in 1..num_players)(active_skills[p] * team_assignment[p]);
+
+var int: attend_a = sum(p in 1..num_players)(attendances[p] * (1 - team_assignment[p]));
+var int: attend_b = sum(p in 1..num_players)(attendances[p] * team_assignment[p]);
+
+var int: forwards_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then (1 - team_assignment[p]) else 0 endif
+);
+
+var int: forwards_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then team_assignment[p] else 0 endif
+);
+var int: midfield_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then team_assignment[p] else 0 endif
+);
+var int: defense_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then team_assignment[p] else 0 endif
+);
+
+constraint abs(forwards_a - forwards_b) <= 1;
+constraint abs(midfield_a - midfield_b) <= 1;
+constraint abs(defense_a - defense_b) <= 1;
+
+array[1..num_players] of var 0..1: is_top2_a;
+array[1..num_players] of var 0..1: is_top2_b;
+
+constraint forall(p in 1..num_players)(is_top2_a[p] <= (1 - team_assignment[p]));
+constraint forall(p in 1..num_players)(is_top2_b[p] <= team_assignment[p]);
+constraint sum(p in 1..num_players)(is_top2_a[p]) = 2;
+constraint sum(p in 1..num_players)(is_top2_b[p]) = 2;
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  experiences[i]
+  + BIG_M * (1 - is_top2_a[i])
+  + BIG_M * team_assignment[i]
+  + BIG_M * team_assignment[j]
+  + BIG_M * is_top2_a[j]
+  >= experiences[j]
+);
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  experiences[i]
+  + BIG_M * (1 - is_top2_b[i])
+  + BIG_M * (1 - team_assignment[i])
+  + BIG_M * (1 - team_assignment[j])
+  + BIG_M * is_top2_b[j]
+  >= experiences[j]
+);
+
+var int: top_two_a = sum(p in 1..num_players)(experiences[p] * is_top2_a[p]);
+var int: top_two_b = sum(p in 1..num_players)(experiences[p] * is_top2_b[p]);
+
+var int: active_skill_diff = abs(active_skill_a - active_skill_b);
+var int: attend_diff = abs(attend_a - attend_b);
+var int: top_two_diff = abs(top_two_a - top_two_b);
+
+var int: objective =
+  W_ACTIVE * active_skill_diff +
+  W_ATTEND * attend_diff +
+  W_TOPTWO * top_two_diff;
+
+solve minimize objective;
+`;
+
+const ACTIVE_SKILL_PLUS_MODEL = `
+int: num_players;
+array[1..num_players] of int: experiences;
+array[1..num_players] of int: attendances;
+array[1..num_players] of int: position_indices;
+array[1..num_players] of int: is_captain;
+array[1..num_players] of int: friend_group_ids;
+array[1..num_players] of int: high_attendance_flags;
+
+int: POS_FORWARD = 1;
+int: POS_MIDFIELD = 2;
+int: POS_DEFENSE = 3;
+
+int: W_ACTIVE = 60;
+int: W_ATTEND = 25;
+int: W_TOPTWO = 15;
+
+int: MAX_EXP = if num_players > 0 then max(experiences) else 0 endif;
+int: BIG_M = MAX_EXP + 1;
+
+constraint num_players >= 4;
+constraint sum(p in 1..num_players)(is_captain[p]) = 2;
+
+array[1..num_players] of var 0..1: team_assignment;
+
+var int: team_a_size = sum(p in 1..num_players)(1 - team_assignment[p]);
+var int: team_b_size = num_players - team_a_size;
+constraint abs(team_a_size - team_b_size) <= 1;
+
+constraint sum(p in 1..num_players)((1 - team_assignment[p]) * is_captain[p]) = 1;
+constraint sum(p in 1..num_players)(team_assignment[p] * is_captain[p]) = 1;
+
+constraint sum(p in 1..num_players)((1 - team_assignment[p]) * high_attendance_flags[p]) >= 1;
+constraint sum(p in 1..num_players)(team_assignment[p] * high_attendance_flags[p]) >= 1;
+
+constraint forall(i in 1..num_players, j in i+1..num_players)(
+  (friend_group_ids[i] > 0 /\\ friend_group_ids[i] = friend_group_ids[j])
+  -> team_assignment[i] = team_assignment[j]
+);
+
+array[1..num_players] of int: active_skills = [experiences[p] * attendances[p] | p in 1..num_players];
+
+var int: active_skill_a = sum(p in 1..num_players)(active_skills[p] * (1 - team_assignment[p]));
+var int: active_skill_b = sum(p in 1..num_players)(active_skills[p] * team_assignment[p]);
+
+var int: attend_a = sum(p in 1..num_players)(attendances[p] * (1 - team_assignment[p]));
+var int: attend_b = sum(p in 1..num_players)(attendances[p] * team_assignment[p]);
+
+var int: forwards_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then (1 - team_assignment[p]) else 0 endif
+);
+var int: midfield_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then (1 - team_assignment[p]) else 0 endif
+);
+var int: defense_a = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then (1 - team_assignment[p]) else 0 endif
+);
+
+var int: forwards_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_FORWARD then team_assignment[p] else 0 endif
+);
+var int: midfield_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_MIDFIELD then team_assignment[p] else 0 endif
+);
+var int: defense_b = sum(p in 1..num_players)(
+  if position_indices[p] == POS_DEFENSE then team_assignment[p] else 0 endif
+);
+
+constraint abs(forwards_a - forwards_b) <= 1;
+constraint abs(midfield_a - midfield_b) <= 1;
+constraint abs(defense_a - defense_b) <= 1;
+
+array[1..num_players] of var 0..1: is_top2_a;
+array[1..num_players] of var 0..1: is_top2_b;
+
+constraint forall(p in 1..num_players)(is_top2_a[p] <= (1 - team_assignment[p]));
+constraint forall(p in 1..num_players)(is_top2_b[p] <= team_assignment[p]);
+constraint sum(p in 1..num_players)(is_top2_a[p]) = 2;
+constraint sum(p in 1..num_players)(is_top2_b[p]) = 2;
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  experiences[i]
+  + BIG_M * (1 - is_top2_a[i])
+  + BIG_M * team_assignment[i]
+  + BIG_M * team_assignment[j]
+  + BIG_M * is_top2_a[j]
+  >= experiences[j]
+);
+
+constraint forall(i in 1..num_players, j in 1..num_players where i != j)(
+  experiences[i]
+  + BIG_M * (1 - is_top2_b[i])
+  + BIG_M * (1 - team_assignment[i])
+  + BIG_M * (1 - team_assignment[j])
+  + BIG_M * is_top2_b[j]
+  >= experiences[j]
+);
+
+var int: top_two_a = sum(p in 1..num_players)(experiences[p] * is_top2_a[p]);
+var int: top_two_b = sum(p in 1..num_players)(experiences[p] * is_top2_b[p]);
+
+var int: active_skill_diff = abs(active_skill_a - active_skill_b);
+var int: attend_diff = abs(attend_a - attend_b);
+var int: top_two_diff = abs(top_two_a - top_two_b);
+
+var int: objective =
+  W_ACTIVE * active_skill_diff +
+  W_ATTEND * attend_diff +
+  W_TOPTWO * top_two_diff;
+
+solve minimize objective;
+`;
+
 // Update scenario description when selection changes
-scenarioSelect?.addEventListener('change', updateScenarioDescription);
+scenarioSelect?.addEventListener('change', onScenarioChange);
 
 function updateScenarioDescription() {
   const scenarioDesc = document.getElementById('scenarioDescription');
+  const csvHint = document.getElementById('csvHint');
+  const diffLabel = document.getElementById('diffLabel');
   if (!scenarioDesc) return;
   
   switch (scenarioSelect.value) {
     case 'with_positions':
       scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings + Positions - Teams balanced by skill rating AND position distribution.';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (diffLabel) diffLabel.textContent = 'Rating Difference';
       break;
     case 'balanced_positions':
       scenarioDesc.innerHTML = '<strong>Scenario:</strong> Position-wise Ratings - Balance skill ratings within each position group (forwards, midfield, defense).';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (diffLabel) diffLabel.textContent = 'Rating Difference';
+      break;
+    case 'expected_active_skill':
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (Attendance+TopTwo) - Balance expected active skill, attendance, top-two experience, and positions.';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position (e.g. attendance_weeks 0-7)';
+      }
+      if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
+      break;
+    case 'expected_active_skill_mip':
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (MIP) - MIP-friendly formulation for CBC/COIN-BC while preserving active-skill balancing goals.';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position (e.g. attendance_weeks 0-7)';
+      }
+      if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
+      break;
+    case 'active_skill_plus':
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Active Skill Plus (Attendance+Top2+Friends+Captains) - Adds friend pairing, captain split, and high-attendance constraints.';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position, captain, friend_group_id';
+      }
+      if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
       break;
     default:
       scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings Only - Teams balanced by total skill rating only.';
+      if (csvHint) {
+        csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (diffLabel) diffLabel.textContent = 'Rating Difference';
   }
+}
+
+function validateCSVForScenario(headers, scenario) {
+  const normalized = headers.map((h) => h.trim().toLowerCase());
+  if (scenario === 'expected_active_skill' || scenario === 'expected_active_skill_mip') {
+    const hasName = normalized.includes('name');
+    const hasExperience = normalized.includes('experience');
+    const hasAttendanceWeeks = normalized.includes('attendance_weeks');
+    const hasPosition = normalized.includes('position');
+    if (!hasName || !hasExperience || !hasAttendanceWeeks || !hasPosition) {
+      return {
+        valid: false,
+        error:
+          "This scenario requires columns: name, experience, attendance_weeks, position",
+      };
+    }
+    return { valid: true };
+  }
+
+  if (scenario === 'active_skill_plus') {
+    const hasName = normalized.includes('name');
+    const hasExperience = normalized.includes('experience');
+    const hasAttendanceWeeks = normalized.includes('attendance_weeks');
+    const hasPosition = normalized.includes('position');
+    const hasCaptain = normalized.includes('captain');
+    const hasFriendGroup = normalized.includes('friend_group_id');
+
+    if (!hasName || !hasExperience || !hasAttendanceWeeks || !hasPosition || !hasCaptain || !hasFriendGroup) {
+      return {
+        valid: false,
+        error:
+          'This scenario requires columns: name, experience, attendance_weeks, position, captain, friend_group_id',
+      };
+    }
+
+    return { valid: true };
+  }
+
+  if (scenario === 'with_positions' || scenario === 'balanced_positions') {
+    const hasName = normalized.includes('name');
+    const hasRating = normalized.includes('rating');
+    const hasExperience = normalized.includes('experience');
+    const hasPosition = normalized.includes('position');
+    if (!hasName || (!hasRating && !hasExperience) || !hasPosition) {
+      return {
+        valid: false,
+        error: 'This scenario requires columns: name, rating (or experience), position',
+      };
+    }
+    return { valid: true };
+  }
+
+  const hasName = normalized.includes('name');
+  const hasRating = normalized.includes('rating');
+  const hasExperience = normalized.includes('experience');
+  if (!hasName || (!hasRating && !hasExperience)) {
+    return {
+      valid: false,
+      error: 'This scenario requires columns: name and rating (or experience)',
+    };
+  }
+  return { valid: true };
+}
+
+function updateSolverOptionsForScenario() {
+  const scenario = scenarioSelect?.value;
+  if (!solverSelect || !scenario) {
+    return;
+  }
+
+  if (currentMode === 'local') {
+    const originalSolver = solverSelect.value;
+
+    if (scenario === 'expected_active_skill') {
+      solverSelect.innerHTML = `
+        <option value="chuffed">Chuffed</option>
+        <option value="cp-sat" selected>CP-SAT (OR-Tools)</option>
+      `;
+      if (originalSolver === 'chuffed' || originalSolver === 'cp-sat') {
+        solverSelect.value = originalSolver;
+      }
+      return;
+    }
+
+    if (scenario === 'expected_active_skill_mip') {
+      solverSelect.innerHTML = `
+        <option value="cbc" selected>CBC (Fastest)</option>
+        <option value="coinbc">COIN-BC</option>
+        <option value="chuffed">Chuffed</option>
+        <option value="cp-sat">CP-SAT (OR-Tools)</option>
+      `;
+      if (['cbc', 'coinbc', 'chuffed', 'cp-sat'].includes(originalSolver)) {
+        solverSelect.value = originalSolver;
+      }
+      return;
+    }
+
+    solverSelect.innerHTML = `
+      <option value="cbc" selected>CBC (Fastest)</option>
+      <option value="coinbc">COIN-BC</option>
+      <option value="chuffed">Chuffed</option>
+      <option value="cp-sat">CP-SAT (OR-Tools)</option>
+    `;
+    if (['cbc', 'coinbc', 'chuffed', 'cp-sat'].includes(originalSolver)) {
+      solverSelect.value = originalSolver;
+    }
+    return;
+  }
+
+  if (scenario === 'expected_active_skill') {
+    solverSelect.innerHTML = `
+      <option value="gecode" selected>Gecode (Default)</option>
+      <option value="chuffed">Chuffed</option>
+    `;
+    return;
+  }
+
+  solverSelect.innerHTML = `
+    <option value="gecode" selected>Gecode (Default)</option>
+    <option value="chuffed">Chuffed</option>
+    <option value="cbc">CBC</option>
+  `;
+}
+
+function onScenarioChange() {
+  updateScenarioDescription();
+  updateSolverOptionsForScenario();
 }
 
 // Detect mode and update banner
@@ -286,10 +771,13 @@ function setMode(mode, serverMode = null) {
     `;
     infoNote.textContent = 'CP-SAT is not available in browser/WASM mode.';
   }
+
+  updateSolverOptionsForScenario();
 }
 
 // Initialize mode detection
 detectMode();
+onScenarioChange();
 
 // Click to upload
 dropZone.addEventListener('click', () => fileInput.click());
@@ -338,26 +826,99 @@ function handleFile(file) {
 // Parse CSV to model data
 function parseCSV(csvText) {
   const lines = csvText.trim().split('\n');
+  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
   const players = [];
   const ratings = [];
   const positions = [];
   const positionIndices = [];
+  const experiences = [];
+  const attendances = [];
+  const isCaptain = [];
+  const friendGroupIds = [];
+  const highAttendanceFlags = [];
 
   const positionMap = { forward: 1, midfield: 2, defense: 3, unknown: 0 };
+  const nameIdx = headers.indexOf('name');
+  const ratingIdx = headers.indexOf('rating');
+  const positionIdx = headers.indexOf('position');
+  const experienceIdx = headers.indexOf('experience');
+  const attendanceWeeksIdx = headers.indexOf('attendance_weeks');
+  const captainIdx = headers.indexOf('captain');
+  const friendGroupIdx = headers.indexOf('friend_group_id');
+
+  const hasNewFormat = experienceIdx !== -1 && attendanceWeeksIdx !== -1;
 
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
+    const values = lines[i].split(',').map((v) => v.trim());
     if (values.length >= 2) {
-      const name = values[0].trim();
-      const rating = parseInt(values[1].trim(), 10);
-      const position = values[2] ? values[2].trim().toLowerCase() : 'unknown';
+      const name = (nameIdx >= 0 ? values[nameIdx] : '') || `Player ${i}`;
+      const position = (positionIdx >= 0 ? values[positionIdx] : 'unknown').toLowerCase() || 'unknown';
+      let rating;
+      let experience;
+      let attendanceWeeks;
+      let attendanceProbability;
+      let experienceCategory;
+      let attendanceCategory;
+      let activeSkill;
+      let playerIsCaptain;
+      let playerFriendGroupId;
+      let highAttendance;
 
-      if (!isNaN(rating)) {
-        players.push({ name, rating, position });
-        ratings.push(rating);
-        positions.push(position);
-        positionIndices.push(positionMap[position] || 0);
+      if (hasNewFormat) {
+        experience = parseInt(values[experienceIdx], 10);
+        attendanceWeeks = parseInt(values[attendanceWeeksIdx], 10);
+        if (isNaN(experience) || isNaN(attendanceWeeks)) {
+          continue;
+        }
+        experience = Math.max(1, Math.min(10, experience));
+        attendanceWeeks = Math.max(0, Math.min(TOTAL_SEASON_WEEKS, attendanceWeeks));
+        attendanceProbability = attendanceWeeks / TOTAL_SEASON_WEEKS;
+        experienceCategory =
+          experience <= 3 ? 'novice' : experience <= 7 ? 'intermediate' : 'veteran';
+        attendanceCategory =
+          attendanceWeeks <= 3 ? 'low' : attendanceWeeks <= 5 ? 'mid' : 'high';
+        activeSkill = Number((experience * attendanceProbability).toFixed(2));
+        rating = experience;
+        const captainRaw = captainIdx >= 0 ? values[captainIdx]?.toLowerCase() : '';
+        playerIsCaptain = captainRaw === '1' || captainRaw === 'true' || captainRaw === 'yes';
+        playerFriendGroupId = friendGroupIdx >= 0 ? parseInt(values[friendGroupIdx], 10) : 0;
+        if (isNaN(playerFriendGroupId ?? 0)) {
+          playerFriendGroupId = 0;
+        }
+        highAttendance = attendanceWeeks >= 6;
+        experiences.push(experience * 10);
+        attendances.push(Math.round(attendanceProbability * 100));
+        isCaptain.push(playerIsCaptain ? 1 : 0);
+        friendGroupIds.push(playerFriendGroupId ?? 0);
+        highAttendanceFlags.push(highAttendance ? 1 : 0);
+      } else {
+        if (ratingIdx >= 0) {
+          rating = parseInt(values[ratingIdx], 10);
+        } else if (experienceIdx >= 0) {
+          rating = parseInt(values[experienceIdx], 10);
+        }
+        if (isNaN(rating)) {
+          continue;
+        }
       }
+
+      players.push({
+        name,
+        rating,
+        position,
+        experience,
+        attendanceWeeks,
+        attendanceProbability,
+        experienceCategory,
+        attendanceCategory,
+        activeSkill,
+        isCaptain: playerIsCaptain,
+        friendGroupId: playerFriendGroupId,
+        highAttendance,
+      });
+      ratings.push(rating);
+      positions.push(position);
+      positionIndices.push(positionMap[position] || 0);
     }
   }
 
@@ -367,7 +928,17 @@ function parseCSV(csvText) {
       num_players: players.length,
       ratings,
       position_indices: positionIndices,
+      ...(hasNewFormat
+        ? {
+            experiences,
+            attendances,
+            is_captain: isCaptain,
+            friend_group_ids: friendGroupIds,
+            high_attendance_flags: highAttendanceFlags,
+          }
+        : {}),
     },
+    headers,
   };
 }
 
@@ -398,6 +969,15 @@ async function solveWithWasm(solver, scenario, modelData) {
       break;
     case 'balanced_positions':
       modelCode = BALANCED_POSITIONS_MODEL;
+      break;
+    case 'expected_active_skill':
+      modelCode = EXPECTED_ACTIVE_SKILL_MODEL;
+      break;
+    case 'expected_active_skill_mip':
+      modelCode = EXPECTED_ACTIVE_SKILL_MIP_MODEL;
+      break;
+    case 'active_skill_plus':
+      modelCode = ACTIVE_SKILL_PLUS_MODEL;
       break;
     default:
       modelCode = RATINGS_ONLY_MODEL;
@@ -448,6 +1028,15 @@ async function solveWithWasm(solver, scenario, modelData) {
         position_diff: json.position_diff,
         rating_weight: json.RATING_WEIGHT || 10,
         objective: json.objective,
+        active_skill_a: json.active_skill_a,
+        active_skill_b: json.active_skill_b,
+        attend_a: json.attend_a,
+        attend_b: json.attend_b,
+        top_two_a: json.top_two_a,
+        top_two_b: json.top_two_b,
+        active_skill_diff: json.active_skill_diff,
+        attend_diff: json.attend_diff,
+        top_two_diff: json.top_two_diff,
       };
     }
   }
@@ -470,6 +1059,16 @@ solveBtn.addEventListener('click', async () => {
   const solver = solverSelect.value;
   const scenario = scenarioSelect?.value || 'ratings_only';
 
+  if (
+    scenario === 'expected_active_skill' &&
+    (solver === 'cbc' || solver === 'coinbc')
+  ) {
+    results.innerHTML =
+      '<div class="error">CBC/COIN-BC are disabled for Expected Active Skill (Attendance+TopTwo). This model uses global sort constraints with indicator coupling, which MIP backends often struggle with and may return UNKNOWN. Use CP-SAT/Chuffed for this scenario, or switch to Expected Active Skill (MIP).</div>';
+    results.classList.add('active');
+    return;
+  }
+
   // Show loading
   loading.classList.add('active');
   results.classList.remove('active');
@@ -477,6 +1076,21 @@ solveBtn.addEventListener('click', async () => {
 
   try {
     let data;
+    const headerLine = String(csvData).trim().split('\n')[0] || '';
+    const headers = headerLine.split(',').map((h) => h.trim());
+    const csvValidation = validateCSVForScenario(headers, scenario);
+    if (!csvValidation.valid) {
+      throw new Error(csvValidation.error);
+    }
+    const parsedForValidation = parseCSV(csvData);
+    if (scenario === 'active_skill_plus') {
+      const captainCount = (parsedForValidation.data.is_captain || []).reduce((sum, c) => sum + c, 0);
+      if (captainCount !== 2) {
+        throw new Error(
+          `Active Skill Plus requires exactly 2 captains in CSV (captain=1/true/yes). Found ${captainCount}.`
+        );
+      }
+    }
 
     if (currentMode === 'local') {
       // Use Express API
@@ -495,7 +1109,7 @@ solveBtn.addEventListener('click', async () => {
       displayResults(data, scenario);
     } else {
       // Use WASM
-      const { players, data: modelData } = parseCSV(csvData);
+      const { players, data: modelData } = parsedForValidation;
       const result = await solveWithWasm(solver, scenario, modelData);
 
       // Build team rosters from assignment
@@ -568,7 +1182,28 @@ function displayResults(data, scenario) {
   // Calculate totals
   const totalA = solution?.total_rating_a || sortedTeamA.reduce((sum, p) => sum + p.rating, 0);
   const totalB = solution?.total_rating_b || sortedTeamB.reduce((sum, p) => sum + p.rating, 0);
-  const diff = solution?.rating_difference || Math.abs(totalA - totalB);
+  const ratingDiff = solution?.rating_difference || Math.abs(totalA - totalB);
+
+  const activeSkillA =
+    isExpectedSkillScenario(scenario)
+      ? (solution?.active_skill_a ?? 0) / 1000
+      : null;
+  const activeSkillB =
+    isExpectedSkillScenario(scenario)
+      ? (solution?.active_skill_b ?? 0) / 1000
+      : null;
+  const activeSkillDiff =
+    isExpectedSkillScenario(scenario)
+      ? (solution?.active_skill_diff ?? 0) / 1000
+      : null;
+  const attendAWeeks =
+    isExpectedSkillScenario(scenario) ? (((solution?.attend_a ?? 0) / 100) * TOTAL_SEASON_WEEKS) : null;
+  const attendBWeeks =
+    isExpectedSkillScenario(scenario) ? (((solution?.attend_b ?? 0) / 100) * TOTAL_SEASON_WEEKS) : null;
+  const topTwoA =
+    isExpectedSkillScenario(scenario) ? ((solution?.top_two_a ?? 0) / 10) : null;
+  const topTwoB =
+    isExpectedSkillScenario(scenario) ? ((solution?.top_two_b ?? 0) / 10) : null;
 
   // Calculate position-wise ratings for balanced_positions scenario
   const forwardRatingA = sortedTeamA.filter(p => p.position === 'forward').reduce((s, p) => s + p.rating, 0);
@@ -584,12 +1219,25 @@ function displayResults(data, scenario) {
     teamB: sortedTeamB,
     totalA,
     totalB,
-    diff,
+    diff: isExpectedSkillScenario(scenario) ? activeSkillDiff : ratingDiff,
     solveTime: result.solveTime,
     status: result.status,
     playerCount: (players || []).length || (sortedTeamA.length + sortedTeamB.length),
     solution,
     scenario,
+    activeSkill: {
+      teamA: activeSkillA,
+      teamB: activeSkillB,
+      diff: activeSkillDiff,
+    },
+    attendanceWeeks: {
+      teamA: attendAWeeks,
+      teamB: attendBWeeks,
+    },
+    topTwo: {
+      teamA: topTwoA,
+      teamB: topTwoB,
+    },
     positionRatings: {
       forwardA: forwardRatingA, forwardB: forwardRatingB,
       midfieldA: midfieldRatingA, midfieldB: midfieldRatingB,
@@ -597,10 +1245,13 @@ function displayResults(data, scenario) {
     },
   };
 
-   // Update DOM - show position-wise breakdown for balanced_positions
+   // Update DOM - show scenario-specific totals
   if (scenario === 'balanced_positions') {
     document.getElementById('teamATotal').textContent = `(D: ${defenseRatingA}, M: ${midfieldRatingA}, F: ${forwardRatingA} = ${totalA} rating points)`;
     document.getElementById('teamBTotal').textContent = `(D: ${defenseRatingB}, M: ${midfieldRatingB}, F: ${forwardRatingB} = ${totalB} rating points)`;
+  } else if (isExpectedSkillScenario(scenario)) {
+    document.getElementById('teamATotal').textContent = `(Active: ${(activeSkillA || 0).toFixed(2)} | ExpAttend: ${(attendAWeeks || 0).toFixed(1)} weeks)`;
+    document.getElementById('teamBTotal').textContent = `(Active: ${(activeSkillB || 0).toFixed(2)} | ExpAttend: ${(attendBWeeks || 0).toFixed(1)} weeks)`;
   } else {
     document.getElementById('teamATotal').textContent = `(${totalA} rating points)`;
     document.getElementById('teamBTotal').textContent = `(${totalB} rating points)`;
@@ -615,7 +1266,11 @@ function displayResults(data, scenario) {
     <li>
       <span class="player-number">${idx + 1}.</span>
       <span class="player-name">${p.name}</span>
-      <span class="player-details">${p.position} - Rating: ${p.rating}</span>
+      <span class="player-details">${
+        isExpectedSkillScenario(scenario)
+          ? `${p.position} - Active: ${(p.activeSkill ?? 0).toFixed(2)} | Exp: <span class="exp-tag exp-${p.experienceCategory || 'intermediate'}">${p.experience ?? p.rating} (${p.experienceCategory || 'intermediate'})</span>`
+          : `${p.position} - Rating: ${p.rating}`
+      }</span>
     </li>
   `
     )
@@ -627,13 +1282,20 @@ function displayResults(data, scenario) {
     <li>
       <span class="player-number">${idx + 1}.</span>
       <span class="player-name">${p.name}</span>
-      <span class="player-details">${p.position} - Rating: ${p.rating}</span>
+      <span class="player-details">${
+        isExpectedSkillScenario(scenario)
+          ? `${p.position} - Active: ${(p.activeSkill ?? 0).toFixed(2)} | Exp: <span class="exp-tag exp-${p.experienceCategory || 'intermediate'}">${p.experience ?? p.rating} (${p.experienceCategory || 'intermediate'})</span>`
+          : `${p.position} - Rating: ${p.rating}`
+      }</span>
     </li>
   `
     )
     .join('');
 
-  document.getElementById('ratingDiff').textContent = diff;
+  document.getElementById('ratingDiff').textContent =
+    isExpectedSkillScenario(scenario)
+      ? (activeSkillDiff || 0).toFixed(2)
+      : String(ratingDiff);
   document.getElementById('solveTime').textContent = result.solveTime;
   document.getElementById('status').textContent = result.status;
   document.getElementById('playerCount').textContent = lastResults.playerCount;
@@ -673,6 +1335,15 @@ function displaySolverOutput(solution, scenario, totalA, totalB, teamA, teamB) {
   let scenarioName = 'Ratings Only';
   if (scenario === 'with_positions') scenarioName = 'Ratings + Positions';
   if (scenario === 'balanced_positions') scenarioName = 'Position-wise Ratings';
+  if (scenario === 'expected_active_skill') {
+    scenarioName = 'Expected Active Skill (Attendance+TopTwo)';
+  }
+  if (scenario === 'expected_active_skill_mip') {
+    scenarioName = 'Expected Active Skill (MIP)';
+  }
+  if (scenario === 'active_skill_plus') {
+    scenarioName = 'Active Skill Plus (Attendance+Top2+Friends+Captains)';
+  }
   output += `Scenario: ${scenarioName}\n`;
   output += `Status: ${solution?.status || 'OPTIMAL'}\n\n`;
   
@@ -718,6 +1389,37 @@ function displaySolverOutput(solution, scenario, totalA, totalB, teamA, teamB) {
     output += `         = ${objectiveValue}\n\n`;
     output += `Note: Each position group is balanced for skill, ensuring equal strength at forwards, midfield, and defense.\n`;
   }
+
+  if (isExpectedSkillScenario(scenario) && solution) {
+    const activeA = (solution.active_skill_a || 0) / 1000;
+    const activeB = (solution.active_skill_b || 0) / 1000;
+    const activeDiff = (solution.active_skill_diff || 0) / 1000;
+    const attendAWeeks = ((solution.attend_a || 0) / 100) * TOTAL_SEASON_WEEKS;
+    const attendBWeeks = ((solution.attend_b || 0) / 100) * TOTAL_SEASON_WEEKS;
+    const attendDiffWeeks = ((solution.attend_diff || 0) / 100) * TOTAL_SEASON_WEEKS;
+    const topTwoA = (solution.top_two_a || 0) / 10;
+    const topTwoB = (solution.top_two_b || 0) / 10;
+    const topTwoDiff = (solution.top_two_diff || 0) / 10;
+
+    output += '--- Expected Active Skill ---\n';
+    output += `Team A: ${activeA.toFixed(2)}\n`;
+    output += `Team B: ${activeB.toFixed(2)}\n`;
+    output += `Diff: ${activeDiff.toFixed(2)}\n\n`;
+
+    output += '--- Attendance (Expected Weeks) ---\n';
+    output += `Team A: ${attendAWeeks.toFixed(1)} weeks\n`;
+    output += `Team B: ${attendBWeeks.toFixed(1)} weeks\n`;
+    output += `Diff: ${attendDiffWeeks.toFixed(1)} weeks\n\n`;
+
+    output += '--- TopTwo Experience ---\n';
+    output += `Team A: ${topTwoA.toFixed(1)}\n`;
+    output += `Team B: ${topTwoB.toFixed(1)}\n`;
+    output += `Diff: ${topTwoDiff.toFixed(1)}\n\n`;
+
+    output += '--- Weighted Objective ---\n';
+    output += 'Objective = 60*active_diff + 25*attendance_diff + 15*top_two_diff\n';
+    output += `Objective = ${solution.objective ?? 'N/A'}\n`;
+  }
   
   output += '\n--- Team Rosters (sorted by position, then name) ---\n\n';
   
@@ -743,26 +1445,61 @@ function downloadResultsCSV() {
   
   // Build CSV content
   const csvLines = [
-    'Team,Number,Name,Position,Rating',
+    isExpectedSkillScenario(scenario)
+      ? 'Team,Number,Name,Position,Experience,AttendanceWeeks,AttendanceProbability,ActiveSkill'
+      : 'Team,Number,Name,Position,Rating',
   ];
 
   teamA.forEach((p, idx) => {
+    if (isExpectedSkillScenario(scenario)) {
+      csvLines.push(
+        `Team A,${idx + 1},${p.name},${p.position},${p.experience ?? p.rating},${p.attendanceWeeks ?? ''},${
+          p.attendanceProbability ?? ''
+        },${p.activeSkill ?? ''}`
+      );
+      return;
+    }
     csvLines.push(`Team A,${idx + 1},${p.name},${p.position},${p.rating}`);
   });
 
   teamB.forEach((p, idx) => {
+    if (isExpectedSkillScenario(scenario)) {
+      csvLines.push(
+        `Team B,${idx + 1},${p.name},${p.position},${p.experience ?? p.rating},${p.attendanceWeeks ?? ''},${
+          p.attendanceProbability ?? ''
+        },${p.activeSkill ?? ''}`
+      );
+      return;
+    }
     csvLines.push(`Team B,${idx + 1},${p.name},${p.position},${p.rating}`);
   });
 
   // Add summary
   csvLines.push('');
   csvLines.push('Summary');
-  csvLines.push(`Scenario,${scenario === 'with_positions' ? 'Ratings + Positions' : 'Ratings Only'}`);
-  csvLines.push(`Team A Total Rating,${totalA}`);
-  csvLines.push(`Team B Total Rating,${totalB}`);
-  csvLines.push(`Rating Difference,${diff}`);
+  let scenarioTitle = 'Ratings Only';
+  if (scenario === 'with_positions') scenarioTitle = 'Ratings + Positions';
+  if (scenario === 'balanced_positions') scenarioTitle = 'Position-wise Ratings';
+  if (scenario === 'expected_active_skill') scenarioTitle = 'Expected Active Skill (Attendance+TopTwo)';
+  if (scenario === 'expected_active_skill_mip') scenarioTitle = 'Expected Active Skill (MIP)';
+  if (scenario === 'active_skill_plus') scenarioTitle = 'Active Skill Plus (Attendance+Top2+Friends+Captains)';
+  csvLines.push(`Scenario,${scenarioTitle}`);
+
+  if (isExpectedSkillScenario(scenario)) {
+    csvLines.push(`Team A Active Skill,${((solution?.active_skill_a || 0) / 1000).toFixed(2)}`);
+    csvLines.push(`Team B Active Skill,${((solution?.active_skill_b || 0) / 1000).toFixed(2)}`);
+    csvLines.push(`Active Skill Difference,${((solution?.active_skill_diff || 0) / 1000).toFixed(2)}`);
+    csvLines.push(`Team A Expected Attendance (weeks),${(((solution?.attend_a || 0) / 100) * TOTAL_SEASON_WEEKS).toFixed(2)}`);
+    csvLines.push(`Team B Expected Attendance (weeks),${(((solution?.attend_b || 0) / 100) * TOTAL_SEASON_WEEKS).toFixed(2)}`);
+    csvLines.push(`TopTwo Team A,${((solution?.top_two_a || 0) / 10).toFixed(1)}`);
+    csvLines.push(`TopTwo Team B,${((solution?.top_two_b || 0) / 10).toFixed(1)}`);
+  } else {
+    csvLines.push(`Team A Total Rating,${totalA}`);
+    csvLines.push(`Team B Total Rating,${totalB}`);
+    csvLines.push(`Rating Difference,${diff}`);
+  }
   
-  if (scenario === 'with_positions' && solution) {
+  if ((scenario === 'with_positions' || isExpectedSkillScenario(scenario)) && solution) {
     csvLines.push(`Team A Forwards,${solution.forwards_a}`);
     csvLines.push(`Team B Forwards,${solution.forwards_b}`);
     csvLines.push(`Team A Midfield,${solution.midfield_a}`);
