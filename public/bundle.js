@@ -476,48 +476,67 @@ function updateScenarioDescription() {
   const scenarioDesc = document.getElementById('scenarioDescription');
   const csvHint = document.getElementById('csvHint');
   const diffLabel = document.getElementById('diffLabel');
+  const scenarioCoverage = document.getElementById('scenarioCoverage');
   if (!scenarioDesc) return;
   
   switch (scenarioSelect.value) {
     case 'with_positions':
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings + Positions - Teams balanced by skill rating AND position distribution.';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings + Positions - Covers total rating balance and positional headcount balance (defense/midfield/forward). It does not account for attendance probability, top-two spread, captains, or friend constraints.';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Use when you want balanced team strength and rough positional parity. Not suitable if attendance, captain assignment, or friend pairing are required.';
       }
       if (diffLabel) diffLabel.textContent = 'Rating Difference';
       break;
     case 'balanced_positions':
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Position-wise Ratings - Balance skill ratings within each position group (forwards, midfield, defense).';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Position-wise Ratings - Covers balancing rating totals within each position line (defense/midfield/forward), reducing weak spots by line. It does not model attendance, top-two spread, captains, or friend constraints.';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Use when position-line strength matters more than only total team rating. This is still rating-based and does not include attendance or social constraints.';
       }
       if (diffLabel) diffLabel.textContent = 'Rating Difference';
       break;
     case 'expected_active_skill':
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (Attendance+TopTwo) - Balance expected active skill, attendance, top-two experience, and positions.';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (Attendance+TopTwo) - Covers expected active skill (experience × attendance), top-two spread, and positional balance. Original sort-based model; use CP-SAT/Chuffed, not CBC/COIN-BC.';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position (e.g. attendance_weeks 0-7)';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Best when attendance uncertainty matters. Requires expected-skill CSV columns and does not include friend grouping or captain split rules.';
       }
       if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
       break;
     case 'expected_active_skill_mip':
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (MIP) - MIP-friendly formulation for CBC/COIN-BC while preserving active-skill balancing goals.';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Expected Active Skill (MIP) - Covers the same expected-skill goals as the original model but with a MIP-friendly TopTwo formulation for all local solvers (including CBC/COIN-BC).';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position (e.g. attendance_weeks 0-7)';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Use this expected-skill variant when running CBC/COIN-BC or when you need broader solver compatibility. Still does not include friend/captain constraints.';
       }
       if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
       break;
     case 'active_skill_plus':
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Active Skill Plus (Attendance+Top2+Friends+Captains) - Adds friend pairing, captain split, and high-attendance constraints.';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Active Skill Plus (Attendance+Top2+Friends+Captains) - Covers expected active skill + top-two + positional balance, and adds friend grouping, exactly two captains split across teams, and high-attendance coverage rules.';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, experience, attendance_weeks, position, captain, friend_group_id';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Most complete scenario. Use when you need tactical, reliability, and social constraints together. Requires captain and friend_group_id columns.';
       }
       if (diffLabel) diffLabel.textContent = 'Active Skill Diff';
       break;
     default:
-      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings Only - Teams balanced by total skill rating only.';
+      scenarioDesc.innerHTML = '<strong>Scenario:</strong> Ratings Only - Covers total team rating balance only. It does not enforce positional balance, attendance, top-player spread, captains, or friend constraints.';
       if (csvHint) {
         csvHint.innerHTML = 'CSV with columns: name, rating, position (<a href="./sample-players.csv" download style="color: #667eea;">download sample</a>)';
+      }
+      if (scenarioCoverage) {
+        scenarioCoverage.textContent = 'Fastest and simplest baseline. Great for quick balancing checks when you only care about total skill parity.';
       }
       if (diffLabel) diffLabel.textContent = 'Rating Difference';
   }
@@ -1984,5 +2003,8 @@ function downloadResultsCSV() {
   URL.revokeObjectURL(url);
 }
 
-// Attach download handler
-document.getElementById('downloadBtn')?.addEventListener('click', downloadResultsCSV);
+// Attach download handler (robust fallback for browsers with strict click handling)
+document.getElementById('downloadBtn')?.addEventListener('click', (event) => {
+  event.preventDefault();
+  downloadResultsCSV();
+});

@@ -619,17 +619,19 @@
     <div class="objective-card">
       <h2>How It Works</h2>
       <p>
-        This tool uses <strong>MiniZinc</strong> constraint programming to solve a team balancing problem. 
-        Given a list of players with skill ratings, it assigns each player to Team A or Team B while:
+        This tool uses <strong>linear programming via MiniZinc</strong> to allocate camogie players into two evenly matched teams.
+        It applies linear objective functions and constraints (for example: balancing expected active skill, position distribution,
+        captain split, and attendance coverage) to find a fair split of Team A and Team B.
       </p>
       <p style="margin-top: 12px;">
-        <strong>Objective:</strong> <code>minimize |total_rating_A - total_rating_B|</code>
+        <strong>How to use:</strong> 1) Upload CSV, 2) Select scenario (not every CSV format works for every scenario),
+        3) Choose solver, 4) Click <em>Optimize Teams</em>, 5) Review table + field view + download CSV.
       </p>
         <p style="margin-top: 8px;">
-          <strong>Constraints:</strong> Equal team sizes (or differ by at most 1 player)
+          <strong>Base constraints:</strong> Equal team sizes (or differ by at most 1), plus scenario-specific rules.
         </p>
         <p style="margin-top: 8px; font-size: 13px; opacity: 0.9;" id="scenarioDescription">
-          <strong>Scenario:</strong> Ratings Only - Teams balanced by total skill rating only.
+          <strong>Scenario:</strong> Ratings Only - Covers overall rating balance only. Does not enforce positional or attendance balance.
         </p>
     </div>
 
@@ -670,6 +672,11 @@
           <option value="expected_active_skill_mip">Expected Active Skill (MIP) - MIP-friendly model for all solvers</option>
           <option value="active_skill_plus">Active Skill Plus (Attendance+Top2+Friends+Captains) - Adds friend and captain constraints</option>
         </select>
+        <p style="margin-top: 8px; font-size: 12px; color: #6b7280; line-height: 1.45;" id="scenarioCoverage">
+          Ratings Only: balances total rating only. Ratings + Positions: balances total rating + position counts. Position-wise Ratings:
+          balances skill within each position group. Expected Active Skill scenarios: include attendance and top-two balancing
+          (MIP version is solver-friendly for CBC/COIN-BC). Active Skill Plus adds friends/captains/high-attendance constraints.
+        </p>
       </div>
 
       <!-- Solver Selection -->
@@ -684,7 +691,7 @@
       </div>
 
       <!-- Submit Button -->
-      <button class="btn-primary" id="solveBtn" disabled>Optimize Teams</button>
+      <button type="button" class="btn-primary" id="solveBtn" disabled>Optimize Teams</button>
 
       <!-- Loading -->
       <div class="loading" id="loading">
@@ -733,7 +740,7 @@
       </div>
 
       <div class="download-section">
-        <button class="btn-secondary" id="downloadBtn" style="display: none;">Download CSV</button>
+        <button type="button" class="btn-secondary" id="downloadBtn" style="display: none;">Download CSV</button>
       </div>
 
       <!-- Solver Output Details -->
