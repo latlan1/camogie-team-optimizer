@@ -10,3 +10,7 @@ coverage
 # WASM files are copied from node_modules during build
 public/minizinc*.wasm
 public/minizinc*.data
+
+# Local seasonal league CSVs (do not commit)
+data/fall*.csv
+data/spring*.csv
